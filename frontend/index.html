@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Virtual - Universidad</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #2563eb;
+            --secondary: #1e40af;
+            --accent: #60a5fa;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-700: #374151;
+            --gray-900: #111827;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 0.75rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .user-profile {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            cursor: pointer;
+        }
+
+        .user-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        /* Main Content */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 65px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 280px;
+            background: white;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+        }
+
+        .sidebar-header {
+            padding: 1.5rem;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .student-info {
+            text-align: center;
+        }
+
+        .student-avatar {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            margin: 0 auto 1rem;
+            background: white;
+            padding: 3px;
+        }
+
+        .student-avatar img {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            object-fit: cover;
+        }
+
+        .student-name {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+
+        .student-id {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .student-program {
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            padding: 0.5rem;
+            background: rgba(255,255,255,0.2);
+            border-radius: 4px;
+        }
+
+        .progress-circle {
+            margin: 1rem auto;
+            width: 100px;
+            height: 100px;
+            position: relative;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .sidebar-menu {
+            padding: 1rem 0;
+        }
+
+        .menu-item {
+            padding: 0.875rem 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            color: var(--gray-700);
+            text-decoration: none;
+        }
+
+        .menu-item:hover, .menu-item.active {
+            background: var(--gray-50);
+            color: var(--primary);
+            border-left: 4px solid var(--primary);
+        }
+
+        .menu-icon {
+            font-size: 1.25rem;
+        }
+
+        /* Content Area */
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+
+        .content-header {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .welcome-banner {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .banner-text h2 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .banner-text p {
+            opacity: 0.9;
+        }
+
+        .banner-image {
+            width: 200px;
+            height: 150px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 4rem;
+        }
+
+        /* Cards Grid */
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .card-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+
+        .card-description {
+            color: var(--gray-700);
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .stat-label {
+            color: var(--gray-700);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Clases List */
+        .clases-list {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .clase-item {
+            padding: 1rem;
+            border-left: 4px solid var(--primary);
+            background: var(--gray-50);
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .clase-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .clase-title {
+            font-weight: 600;
+            color: var(--gray-900);
+        }
+
+        .clase-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .badge-live {
+            background: var(--danger);
+            color: white;
+        }
+
+        .badge-scheduled {
+            background: var(--warning);
+            color: white;
+        }
+
+        .badge-completed {
+            background: var(--success);
+            color: white;
+        }
+
+        /* Button */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--secondary);
+        }
+
+        /* Período Info */
+        .period-info {
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        /* Hide/Show sections */
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar {
+                display: none;
+            }
+            
+            .cards-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <div class="logo">
+                🎓 Campus Virtual
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="user-profile">
+                <div class="user-avatar">KR</div>
+                <div>
+                    <div style="font-weight: 600; font-size: 0.9rem;">Katherine Ruth</div>
+                    <div style="font-size: 0.75rem; color: var(--gray-700);">Estudiante</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="student-info">
+                    <div class="student-avatar">
+                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23667eea'/%3E%3Ctext x='50' y='50' text-anchor='middle' dy='.3em' fill='white' font-size='40' font-family='Arial'%3EKR%3C/text%3E%3C/svg%3E" alt="Avatar">
+                    </div>
+                    <div class="student-name">Katherine Ruth Herrera Galloso</div>
+                    <div class="student-id">Matrícula: 24018097</div>
+                    <div class="student-program">Bachillerato General</div>
+                    <div class="progress-circle">
+                        <svg width="100" height="100">
+                            <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="8"/>
+                            <circle cx="50" cy="50" r="40" fill="none" stroke="white" stroke-width="8" 
+                                    stroke-dasharray="251" stroke-dashoffset="161" transform="rotate(-90 50 50)"/>
+                        </svg>
+                        <div class="progress-text">36%</div>
+                    </div>
+                    <div style="font-size: 0.85rem;">9 de 25 Materias</div>
+                </div>
+            </div>
+
+            <div class="sidebar-menu">
+                <a href="#" class="menu-item active" onclick="showSection('inicio'); return false;">
+                    <span class="menu-icon">🏠</span>
+                    <span>Inicio</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('biblioteca'); return false;">
+                    <span class="menu-icon">📚</span>
+                    <span>Biblioteca Digital</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('control'); return false;">
+                    <span class="menu-icon">📋</span>
+                    <span>Control Escolar</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('tutor'); return false;">
+                    <span class="menu-icon">👨‍🏫</span>
+                    <span>Mi Tutor</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('ayuda'); return false;">
+                    <span class="menu-icon">🆘</span>
+                    <span>Mesa de Ayuda</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('calendario'); return false;">
+                    <span class="menu-icon">📅</span>
+                    <span>Calendario</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('idiomas'); return false;">
+                    <span class="menu-icon">🌎</span>
+                    <span>Centro de Idiomas</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('clases'); return false;">
+                    <span class="menu-icon">🎥</span>
+                    <span>Clases en Línea</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('foro'); return false;">
+                    <span class="menu-icon">💬</span>
+                    <span>Foro de Clase</span>
+                </a>
+            </div>
+        </div>
+
+        <!-- Content -->
+        <div class="content">
+            <!-- Inicio Section -->
+            <div id="inicio" class="section active">
+                <div class="period-info">
+                    <strong>Período:</strong> Octubre 2025 | <strong>Fecha Límite de Entrega:</strong> 22/10/2025
+                </div>
+
+                <div class="welcome-banner">
+                    <div class="banner-text">
+                        <h2>¡Próximo Inicio de Actividades!</h2>
+                        <p>Prepárate para comenzar el periodo modular de este mes</p>
+                    </div>
+                    <div class="banner-image">
+                        🐨
+                    </div>
+                </div>
+
+                <h3 style="margin-bottom: 1rem; color: white;">Servicios del Campus</h3>
+                <div class="cards-grid">
+                    <div class="card" onclick="showSection('preparatoria')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #dbeafe; color: var(--primary);">📖</div>
+                            <div class="card-title">Preparatoria</div>
+                        </div>
+                        <div class="card-description">Accede a tu programa de bachillerato general</div>
+                    </div>
+
+                    <div class="card" onclick="showSection('tsu')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #dcfce7; color: var(--success);">🎓</div>
+                            <div class="card-title">Técnico Superior Universitario</div>
+                        </div>
+                        <div class="card-description">Programas TSU disponibles</div>
+                    </div>
+
+                    <div class="card" onclick="showSection('licenciatura')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #fef3c7; color: var(--warning);">🏆</div>
+                            <div class="card-title">Carreras Profesionales</div>
+                        </div>
+                        <div class="card-description">Explora nuestras licenciaturas</div>
+                    </div>
+
+                    <div class="card" onclick="showSection('maestria')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #e0e7ff; color: #6366f1;">👨‍🎓</div>
+                            <div class="card-title">Maestrías</div>
+                        </div>
+                        <div class="card-description">Programas de posgrado</div>
+                    </div>
+
+                    <div class="card" onclick="showSection('doctorado')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #fce7f3; color: #ec4899;">🔬</div>
+                            <div class="card-title">Doctorado</div>
+                        </div>
+                        <div class="card-description">Estudios de doctorado</div>
+                    </div>
+
+                    <div class="card" onclick="showSection('idiomas')">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #d1fae5; color: #059669;">🌎</div>
+                            <div class="card-title">Centro de Idiomas</div>
+                        </div>
+                        <div class="card-description">Aprende nuevos idiomas</div>
+                    </div>
+                </div>
+
+                <h3 style="margin-bottom: 1rem; color: white;">Tus Estadísticas</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">9</div>
+                        <div class="stat-label">Materias Cursadas</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">25</div>
+                        <div class="stat-label">Materias Totales</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">36%</div>
+                        <div class="stat-label">Progreso Académico</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">8.5</div>
+                        <div class="stat-label">Promedio General</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Biblioteca Section -->
+            <div id="biblioteca" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📚 Biblioteca Digital</h2>
+                <div class="clases-list">
+                    <p style="margin-bottom: 1rem;">Accede a más de 890,000 libros, revistas y artículos digitales</p>
+                    <div class="cards-grid">
+                        <div class="card">
+                            <h4>Libros</h4>
+                            <p>Catálogo completo de libros académicos</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;">Explorar</button>
+                        </div>
+                        <div class="card">
+                            <h4>Revistas</h4>
+                            <p>Publicaciones periódicas especializadas</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;">Ver Revistas</button>
+                        </div>
+                        <div class="card">
+                            <h4>Artículos</h4>
+                            <p>Artículos científicos y académicos</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;">Buscar</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Control Escolar Section -->
+            <div id="control" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📋 Control Escolar</h2>
+                <div class="clases-list">
+                    <h3 style="margin-bottom: 1rem;">Historial Académico</h3>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Matemáticas I</div>
+                            <div class="clase-badge badge-completed">Aprobado - 9.5</div>
+                        </div>
+                        <div>Período: Agosto 2024</div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Español I</div>
+                            <div class="clase-badge badge-completed">Aprobado - 9.0</div>
+                        </div>
+                        <div>Período: Agosto 2024</div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Historia Universal</div>
+                            <div class="clase-badge badge-live">Cursando</div>
+                        </div>
+                        <div>Período: Octubre 2025</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Mi Tutor Section -->
+            <div id="tutor" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">👨‍🏫 Mi Tutor</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <div class="user-avatar" style="width: 60px; height: 60px; font-size: 1.5rem;">JM</div>
+                        <div>
+                            <h3>José Martínez González</h3>
+                            <p style="color: var(--gray-700);">Tutor Académico</p>
+                        </div>
+                    </div>
+                    <div style="margin-top: 1.5rem;">
+                        <p><strong>Email:</strong> jose.martinez@universidad.edu</p>
+                        <p><strong>Teléfono:</strong> 555-1234-5678</p>
+                        <p><strong>Especialidad:</strong> Ciencias Sociales</p>
+                        <p style="margin-top: 1rem;">Horario de atención: Lunes a Viernes, 9:00 AM - 5:00 PM</p>
+                    </div>
+                    <button class="btn btn-primary" style="margin-top: 1.5rem;">Solicitar Cita</button>
+                </div>
+            </div>
+
+            <!-- Mesa de Ayuda Section -->
+            <div id="ayuda" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🆘 Mesa de Ayuda</h2>
+                <div class="card">
+                    <h3>Crear Nuevo Ticket</h3>
+                    <form style="margin-top: 1rem;">
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">Categoría</label>
+                            <select style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;">
+                                <option>Soporte Técnico</option>
+                                <option>Académico</option>
+                                <option>Administrativo</option>
+                                <option>Otro</option>
+                            </select>
+                        </div>
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">Asunto</label>
+                            <input type="text" placeholder="Describe tu problema brevemente" style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;">
+                        </div>
+                        <div style="margin-bottom: 1rem;">
+                            <label style="display: block; margin-bottom: 0.5rem;">Descripción</label>
+                            <textarea rows="4" placeholder="Describe tu problema en detalle" style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;"></textarea>
+                        </div>
+                        <button class="btn btn-primary" type="submit">Enviar Ticket</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Calendario Section -->
+            <div id="calendario" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📅 Calendario Académico</h2>
+                <div class="clases-list">
+                    <h3 style="margin-bottom: 1rem;">Próximos Eventos</h3>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Entrega de Actividades</div>
+                            <div class="clase-badge badge-scheduled">22/10/2025</div>
+                        </div>
+                        <div>Fecha límite para entregar actividades del período actual</div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Inicio de Clases - Nuevo Período</div>
+                            <div class="clase-badge badge-scheduled">27/10/2025</div>
+                        </div>
+                        <div>Comienza el siguiente módulo: Conociendo la Biodiversidad</div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Examen Parcial</div>
+                            <div class="clase-badge badge-scheduled">15/11/2025</div>
+                        </div>
+                        <div>Evaluación del primer parcial</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Centro de Idiomas Section -->
+            <div id="idiomas" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🌎 Centro de Idiomas</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #dbeafe; color: var(--primary);">🇬🇧</div>
+                            <div class="card-title">Inglés</div>
+                        </div>
+                        <div class="card-description">
+                            <p>Niveles: Básico, Intermedio, Avanzado</p>
+                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 1 de Noviembre</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #fef3c7; color: var(--warning);">🇫🇷</div>
+                            <div class="card-title">Francés</div>
+                        </div>
+                        <div class="card-description">
+                            <p>Niveles: Básico, Intermedio, Avanzado</p>
+                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 15 de Noviembre</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-icon" style="background: #fce7f3; color: #ec4899;">🇩🇪</div>
+                            <div class="card-title">Alemán</div>
+                        </div>
+                        <div class="card-description">
+                            <p>Niveles: Básico, Intermedio</p>
+                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 1 de Diciembre</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clases en Línea Section -->
+            <div id="clases" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🎥 Clases en Línea</h2>
+                <div class="clases-list">
+                    <h3 style="margin-bottom: 1rem;">Mis Clases</h3>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Historia Universal - Sesión 5</div>
+                            <div class="clase-badge badge-live">En Vivo</div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <p>Profesor: Dr. Carlos Méndez</p>
+                            <p>Hora: 10:00 AM - 11:30 AM</p>
+                            <button class="btn btn-primary" onclick="window.open('zoom-config.html?id=1', '_blank')">Unirse a la clase</button>
+                        </div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Matemáticas II - Sesión 3</div>
+                            <div class="clase-badge badge-scheduled">Programada</div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <p>Profesor: Ing. Ana López</p>
+                            <p>Fecha: 23/10/2025 - 2:00 PM</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;">Ver Detalles</button>
+                        </div>
+                    </div>
+                    <div class="clase-item">
+                        <div class="clase-header">
+                            <div class="clase-title">Biología - Sesión 2</div>
+                            <div class="clase-badge badge-completed">Finalizada</div>
+                        </div>
+                        <div style="margin-top: 0.5rem;">
+                            <p>Profesor: Dra. María Fernández</p>
+                            <p>Grabación disponible</p>
+                            <button class="btn btn-primary" style="margin-top: 1rem;">Ver Grabación</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Foro de Clase Section -->
+            <div id="foro" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">💬 Foro de Clase</h2>
+                <div class="clases-list">
+                    <h3 style="margin-bottom: 1rem;">Historia Universal - Discusiones</h3>
+                    
+                    <div class="card" style="margin-bottom: 1rem;">
+                        <div style="display: flex; gap: 1rem;">
+                            <div class="user-avatar" style="width: 40px; height: 40px;">CM</div>
+                            <div style="flex: 1;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                    <strong>Carlos Méndez (Profesor)</strong>
+                                    <span style="color: var(--gray-700); font-size: 0.85rem;">Hace 2 horas</span>
+                                </div>
+                                <p style="color: var(--gray-700);">¿Qué opinan sobre el impacto de la Revolución Industrial en la sociedad moderna?</p>
+                                <div style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.85rem; color: var(--gray-700);">
+                                    <span>👍 12 Me gusta</span>
+                                    <span>💬 8 Respuestas</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom: 1rem;">
+                        <div style="display: flex; gap: 1rem;">
+                            <div class="user-avatar" style="width: 40px; height: 40px;">JP</div>
+                            <div style="flex: 1;">
+                                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                                    <strong>Juan Pérez</strong>
+                                    <span style="color: var(--gray-700); font-size: 0.85rem;">Hace 5 horas</span>
+                                </div>
+                                <p style="color: var(--gray-700);">Alguien tiene notas de la clase pasada? No pude conectarme por problemas técnicos.</p>
+                                <div style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.85rem; color: var(--gray-700);">
+                                    <span>👍 5 Me gusta</span>
+                                    <span>💬 3 Respuestas</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h4 style="margin-bottom: 1rem;">Crear Nueva Publicación</h4>
+                        <textarea rows="3" placeholder="Escribe tu pregunta o comentario..." style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px; margin-bottom: 1rem;"></textarea>
+                        <button class="btn btn-primary">Publicar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Preparatoria Section -->
+            <div id="preparatoria" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📖 Preparatoria</h2>
+                <div class="welcome-banner">
+                    <div class="banner-text">
+                        <h2>Bachillerato General</h2>
+                        <p>Completa tu educación media superior con nosotros</p>
+                    </div>
+                </div>
+                <div class="clases-list">
+                    <h3 style="margin-bottom: 1rem;">Información del Programa</h3>
+                    <p style="margin-bottom: 1rem;">Duración: 6 semestres (3 años)</p>
+                    <p style="margin-bottom: 1rem;">Modalidad: En línea</p>
+                    <p style="margin-bottom: 2rem;">Materias por semestre: 5-6 asignaturas</p>
+                    
+                    <h4 style="margin-bottom: 1rem;">Plan de Estudios</h4>
+                    <div class="cards-grid">
+                        <div class="card">
+                            <h4>Primer Semestre</h4>
+                            <ul style="margin-top: 0.5rem; padding-left: 1.5rem;">
+                                <li>Matemáticas I</li>
+                                <li>Español I</li>
+                                <li>Historia Universal</li>
+                                <li>Química I</li>
+                                <li>Inglés I</li>
+                            </ul>
+                        </div>
+                        <div class="card">
+                            <h4>Segundo Semestre</h4>
+                            <ul style="margin-top: 0.5rem; padding-left: 1.5rem;">
+                                <li>Matemáticas II</li>
+                                <li>Español II</li>
+                                <li>Historia de México</li>
+                                <li>Química II</li>
+                                <li>Inglés II</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TSU Section -->
+            <div id="tsu" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🎓 Técnico Superior Universitario</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <h3>TSU en Desarrollo de Software</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Aprende programación, desarrollo web y móvil</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Más</button>
+                    </div>
+                    <div class="card">
+                        <h3>TSU en Administración</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Gestión empresarial y administrativa</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Más</button>
+                    </div>
+                    <div class="card">
+                        <h3>TSU en Contabilidad</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Contabilidad general y fiscal</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Más</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Licenciatura Section -->
+            <div id="licenciatura" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🏆 Carreras Profesionales</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <h3>Licenciatura en Administración</h3>
+                        <p style="margin: 1rem 0;">Duración: 4 años | Créditos: 320</p>
+                        <p>Forma líderes empresariales competentes</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Plan</button>
+                    </div>
+                    <div class="card">
+                        <h3>Licenciatura en Derecho</h3>
+                        <p style="margin: 1rem 0;">Duración: 4 años | Créditos: 340</p>
+                        <p>Formación jurídica integral</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Plan</button>
+                    </div>
+                    <div class="card">
+                        <h3>Licenciatura en Contaduría</h3>
+                        <p style="margin: 1rem 0;">Duración: 4 años | Créditos: 320</p>
+                        <p>Especialización en finanzas y auditoría</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Plan</button>
+                    </div>
+                    <div class="card">
+                        <h3>Licenciatura en Psicología</h3>
+                        <p style="margin: 1rem 0;">Duración: 4 años | Créditos: 330</p>
+                        <p>Comprende el comportamiento humano</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Ver Plan</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Maestría Section -->
+            <div id="maestria" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">👨‍🎓 Maestrías</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <h3>Maestría en Administración de Negocios (MBA)</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Desarrolla habilidades directivas avanzadas</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Informes</button>
+                    </div>
+                    <div class="card">
+                        <h3>Maestría en Educación</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Innovación en procesos educativos</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Informes</button>
+                    </div>
+                    <div class="card">
+                        <h3>Maestría en Tecnologías de la Información</h3>
+                        <p style="margin: 1rem 0;">Duración: 2 años</p>
+                        <p>Gestión de proyectos tecnológicos</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Informes</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Doctorado Section -->
+            <div id="doctorado" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">🔬 Doctorado</h2>
+                <div class="cards-grid">
+                    <div class="card">
+                        <h3>Doctorado en Educación</h3>
+                        <p style="margin: 1rem 0;">Duración: 3 años</p>
+                        <p>Investigación educativa de alto nivel</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Más Información</button>
+                    </div>
+                    <div class="card">
+                        <h3>Doctorado en Administración</h3>
+                        <p style="margin: 1rem 0;">Duración: 3 años</p>
+                        <p>Investigación en ciencias administrativas</p>
+                        <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Más Información</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showSection(sectionId) {
+            // Ocultar todas las secciones
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('active');
+            });
+            
+            // Mostrar la sección seleccionada
+            const selectedSection = document.getElementById(sectionId);
+            if (selectedSection) {
+                selectedSection.classList.add('active');
+            }
+            
+            // Actualizar menú activo
+            document.querySelectorAll('.menu-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Buscar y activar el item del menú correspondiente
+            const menuItems = document.querySelectorAll('.menu-item');
+            menuItems.forEach(item => {
+                if (item.getAttribute('onclick') && item.getAttribute('onclick').includes(sectionId)) {
+                    item.classList.add('active');
+                }
+            });
+        }
+
+        // Cargar datos del API
+        async function loadStudentData() {
+            try {
+                const response = await fetch('/api/estudiantes/');
+                const data = await response.json();
+                console.log('Datos de estudiantes:', data);
+            } catch (error) {
+                console.error('Error cargando datos:', error);
+            }
+        }
+
+        // Cargar al iniciar
+        window.addEventListener('DOMContentLoaded', () => {
+            loadStudentData();
+        });
+    </script>
+</body>
+</html>
