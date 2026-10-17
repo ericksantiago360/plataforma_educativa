@@ -156,6 +156,21 @@ function showSection(sectionId) {
         case 'foro':
             loadForo();
             break;
+        case 'biblioteca':
+            loadBiblioteca();
+            break;
+        case 'tutor':
+            loadTutor();
+            break;
+        case 'ayuda':
+            loadMesaAyuda();
+            break;
+        case 'calendario':
+            loadCalendario();
+            break;
+        case 'idiomas':
+            loadIdiomas();
+            break;
     }
 }
 
@@ -550,6 +565,481 @@ async function eliminarMensaje(mensajeId) {
         return;
     }
     await abrirForo(foroActual);
+}
+
+// ---------- Utilidades compartidas por las secciones de servicios ----------
+
+const ESTILO_CAMPO = 'width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px; font-family: inherit;';
+
+// "2026-11-01" → "1 de noviembre de 2026". Se arma con la fecha local:
+// new Date('2026-11-01') la toma como UTC y en México mostraría el día anterior.
+function formatearDia(fechaISO) {
+    const [anio, mes, dia] = fechaISO.split('-').map(Number);
+    return new Date(anio, mes - 1, dia).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+// Solo enlaces http(s): evita que un "javascript:..." guardado en la base se vuelva clicable
+function urlSegura(url) {
+    return /^https?:\/\//i.test(url || '') ? url : null;
+}
+
+// Mensaje legible a partir de una respuesta de error de DRF ({detail} o errores por campo)
+function mensajeDeError(datos, porDefecto) {
+    if (datos && datos.detail) return datos.detail;
+    const primero = datos && Object.values(datos)[0];
+    if (Array.isArray(primero) && primero.length) return primero[0];
+    return porDefecto;
+}
+
+function errorDeCarga(container, que) {
+    container.innerHTML = `<div class="card"><p style="color: red;">No se pudo cargar ${que}.</p></div>`;
+}
+
+// ---------- Biblioteca Digital ----------
+
+let recursosBiblioteca = [];
+
+const ICONOS_RECURSO = { libro: '📘', revista: '📰', articulo: '📄', video: '🎬' };
+
+async function loadBiblioteca() {
+    const container = document.getElementById('biblioteca-contenido');
+    if (!container) return;
+    container.innerHTML = '<p>Cargando…</p>';
+
+    try {
+        recursosBiblioteca = await getTodas('/biblioteca/');
+    } catch (error) {
+        console.error('Error cargando biblioteca:', error);
+        errorDeCarga(container, 'la biblioteca');
+        return;
+    }
+
+    container.innerHTML = `
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <input id="biblioteca-buscar" type="search" placeholder="Buscar por título, autor o categoría"
+                   aria-label="Buscar en la biblioteca" style="${ESTILO_CAMPO} flex: 1; min-width: 200px; width: auto;">
+            <select id="biblioteca-tipo" aria-label="Tipo de recurso" style="${ESTILO_CAMPO} width: auto;">
+                <option value="">Todos los tipos</option>
+                <option value="libro">Libros</option>
+                <option value="revista">Revistas</option>
+                <option value="articulo">Artículos</option>
+                <option value="video">Videos</option>
+            </select>
+        </div>
+        <div id="biblioteca-resultados"></div>
+    `;
+    document.getElementById('biblioteca-buscar').addEventListener('input', renderBiblioteca);
+    document.getElementById('biblioteca-tipo').addEventListener('change', renderBiblioteca);
+    renderBiblioteca();
+}
+
+function renderBiblioteca() {
+    const texto = document.getElementById('biblioteca-buscar').value.trim().toLowerCase();
+    const tipo = document.getElementById('biblioteca-tipo').value;
+    const resultados = document.getElementById('biblioteca-resultados');
+
+    const filtrados = recursosBiblioteca.filter(r =>
+        (!tipo || r.tipo_recurso === tipo) &&
+        (!texto || [r.titulo, r.autor, r.categoria].some(campo => campo.toLowerCase().includes(texto)))
+    );
+
+    if (filtrados.length === 0) {
+        resultados.innerHTML = recursosBiblioteca.length === 0
+            ? '<p>La biblioteca aún no tiene recursos.</p>'
+            : '<p>No se encontraron recursos con esos filtros.</p>';
+        return;
+    }
+
+    resultados.innerHTML = filtrados.map(recurso => {
+        const url = urlSegura(recurso.url_recurso);
+        return `
+            <div class="clase-item">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(recurso.titulo)}</div>
+                    <div class="clase-badge badge-neutral">${ICONOS_RECURSO[recurso.tipo_recurso] || ''} ${escapeHtml(recurso.tipo_recurso_nombre)}</div>
+                </div>
+                <div style="color: var(--gray-700); font-size: 0.9rem;">
+                    ${escapeHtml(recurso.autor)} · ${escapeHtml(recurso.categoria)} · ${escapeHtml(recurso.fecha_publicacion.slice(0, 4))}
+                </div>
+                <p style="margin-top: 0.5rem;">${escapeHtml(recurso.descripcion)}</p>
+                ${url ? `<a class="btn btn-primary" href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer"
+                            style="display: inline-block; margin-top: 0.75rem; text-decoration: none;">Abrir recurso ↗</a>` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+// ---------- Mi Tutor ----------
+
+async function loadTutor() {
+    const container = document.getElementById('tutor-contenido');
+    if (!container) return;
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    let asignaciones;
+    try {
+        asignaciones = (await getTodas('/asignaciones-tutor/')).filter(a => a.activo);
+    } catch (error) {
+        console.error('Error cargando tutor:', error);
+        errorDeCarga(container, 'la información de tu tutor');
+        return;
+    }
+
+    if (asignaciones.length === 0) {
+        container.innerHTML = '<div class="card"><p>Aún no tienes un tutor asignado. Comunícate con Control Escolar.</p></div>';
+        return;
+    }
+
+    container.innerHTML = asignaciones.map(asignacion => {
+        const iniciales = asignacion.tutor_nombre.split(/\s+/).slice(0, 2).map(p => p.charAt(0)).join('').toUpperCase();
+        const cita = `mailto:${encodeURIComponent(asignacion.tutor_email)}?subject=${encodeURIComponent('Solicitud de cita de tutoría')}`;
+        return `
+            <div class="card" style="margin-bottom: 1rem;">
+                <div class="card-header">
+                    <div class="user-avatar" style="width: 60px; height: 60px; font-size: 1.5rem;">${escapeHtml(iniciales)}</div>
+                    <div>
+                        <h3>${escapeHtml(asignacion.tutor_nombre)}</h3>
+                        <p style="color: var(--gray-700);">Tutor Académico</p>
+                    </div>
+                </div>
+                <div style="margin-top: 1.5rem;">
+                    <p><strong>Email:</strong> <a href="mailto:${escapeHtml(encodeURIComponent(asignacion.tutor_email))}">${escapeHtml(asignacion.tutor_email)}</a></p>
+                    <p><strong>Teléfono:</strong> ${escapeHtml(asignacion.tutor_telefono)}</p>
+                    <p><strong>Especialidad:</strong> ${escapeHtml(asignacion.tutor_especialidad)}</p>
+                </div>
+                <a class="btn btn-primary" href="${escapeHtml(cita)}"
+                   style="display: inline-block; margin-top: 1.5rem; text-decoration: none;">Solicitar cita por correo</a>
+            </div>
+        `;
+    }).join('');
+}
+
+// ---------- Mesa de Ayuda ----------
+
+const BADGES_TICKET = {
+    abierto: 'badge-scheduled',
+    en_proceso: 'badge-scheduled',
+    resuelto: 'badge-completed',
+    cerrado: 'badge-neutral',
+};
+
+const ESTADOS_TICKET = [
+    ['abierto', 'Abierto'],
+    ['en_proceso', 'En Proceso'],
+    ['resuelto', 'Resuelto'],
+    ['cerrado', 'Cerrado'],
+];
+
+async function loadMesaAyuda() {
+    const container = document.getElementById('ayuda-contenido');
+    if (!container) return;
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    let tickets;
+    try {
+        tickets = await getTodas('/mesa-ayuda/');
+    } catch (error) {
+        console.error('Error cargando tickets:', error);
+        errorDeCarga(container, 'la mesa de ayuda');
+        return;
+    }
+
+    const esStaff = usuarioActual && usuarioActual.rol === 'staff';
+    let html = '';
+
+    if (currentStudent) {
+        html += `
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <h3>Crear Nuevo Ticket</h3>
+                <form id="ticket-form" style="margin-top: 1rem;">
+                    <div style="margin-bottom: 1rem;">
+                        <label for="ticket-categoria" style="display: block; margin-bottom: 0.5rem;">Categoría</label>
+                        <select id="ticket-categoria" style="${ESTILO_CAMPO}">
+                            <option value="tecnico">Soporte Técnico</option>
+                            <option value="academico">Académico</option>
+                            <option value="administrativo">Administrativo</option>
+                            <option value="otro">Otro</option>
+                        </select>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="ticket-asunto" style="display: block; margin-bottom: 0.5rem;">Asunto</label>
+                        <input id="ticket-asunto" type="text" maxlength="200" required
+                               placeholder="Describe tu problema brevemente" style="${ESTILO_CAMPO}">
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="ticket-descripcion" style="display: block; margin-bottom: 0.5rem;">Descripción</label>
+                        <textarea id="ticket-descripcion" rows="4" required
+                                  placeholder="Describe tu problema en detalle" style="${ESTILO_CAMPO}"></textarea>
+                    </div>
+                    <p id="ticket-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+                    <button class="btn btn-primary" type="submit" id="ticket-enviar">Enviar Ticket</button>
+                </form>
+            </div>
+        `;
+    }
+
+    html += `<div class="clases-list"><h3 style="margin-bottom: 1rem;">${esStaff ? 'Tickets de los estudiantes' : 'Mis tickets'}</h3>`;
+    if (tickets.length === 0) {
+        html += '<p>No hay tickets.</p>';
+    }
+
+    tickets.forEach(ticket => {
+        const fecha = new Date(ticket.fecha_creacion).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+        html += `
+            <div class="clase-item">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(ticket.asunto)}</div>
+                    <div class="clase-badge ${BADGES_TICKET[ticket.estado] || 'badge-neutral'}">${escapeHtml(ticket.estado_nombre)}</div>
+                </div>
+                <div style="color: var(--gray-700); font-size: 0.85rem;">
+                    ${escapeHtml(ticket.categoria_nombre)} · ${escapeHtml(fecha)}
+                    ${esStaff ? ` · ${escapeHtml(ticket.estudiante_nombre)} ${escapeHtml(ticket.estudiante_apellido)}` : ''}
+                </div>
+                <p style="margin-top: 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(ticket.descripcion)}</p>
+                ${esStaff ? editorDeTicket(ticket) : (ticket.respuesta ? `
+                    <div style="margin-top: 0.75rem; padding: 0.75rem; background: var(--gray-100); border-radius: 8px;">
+                        <strong>Respuesta de soporte:</strong>
+                        <p style="margin-top: 0.25rem; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(ticket.respuesta)}</p>
+                    </div>` : '')}
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    const form = document.getElementById('ticket-form');
+    if (form) form.addEventListener('submit', enviarTicket);
+    container.querySelectorAll('.ticket-guardar').forEach(boton => {
+        boton.addEventListener('click', () => responderTicket(boton.dataset.ticketId, boton.closest('.ticket-editor')));
+    });
+}
+
+function editorDeTicket(ticket) {
+    const opciones = ESTADOS_TICKET.map(([valor, nombre]) =>
+        `<option value="${valor}"${valor === ticket.estado ? ' selected' : ''}>${nombre}</option>`
+    ).join('');
+    return `
+        <div class="ticket-editor" style="margin-top: 0.75rem; padding: 0.75rem; background: var(--gray-100); border-radius: 8px;">
+            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.85rem;">Estado</label>
+            <select class="ticket-estado" style="${ESTILO_CAMPO} margin-bottom: 0.5rem; background: white;">${opciones}</select>
+            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.85rem;">Respuesta al estudiante</label>
+            <textarea class="ticket-respuesta" rows="2" style="${ESTILO_CAMPO} background: white;">${escapeHtml(ticket.respuesta)}</textarea>
+            <p class="ticket-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin: 0.25rem 0;"></p>
+            <button type="button" class="btn btn-primary ticket-guardar" data-ticket-id="${escapeHtml(ticket.id)}">Guardar</button>
+        </div>
+    `;
+}
+
+async function enviarTicket(evento) {
+    evento.preventDefault();
+    const error = document.getElementById('ticket-error');
+    const boton = document.getElementById('ticket-enviar');
+    const datos = {
+        categoria: document.getElementById('ticket-categoria').value,
+        asunto: document.getElementById('ticket-asunto').value.trim(),
+        descripcion: document.getElementById('ticket-descripcion').value.trim(),
+    };
+
+    if (!datos.asunto || !datos.descripcion) {
+        error.textContent = 'Escribe el asunto y la descripción.';
+        return;
+    }
+
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api('/mesa-ayuda/', { method: 'POST', body: JSON.stringify(datos) });
+        if (response.ok) {
+            await loadMesaAyuda();
+            return;
+        }
+        error.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo enviar el ticket.');
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function responderTicket(ticketId, editor) {
+    const error = editor.querySelector('.ticket-error');
+    const boton = editor.querySelector('.ticket-guardar');
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api(`/mesa-ayuda/${encodeURIComponent(ticketId)}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+                estado: editor.querySelector('.ticket-estado').value,
+                respuesta: editor.querySelector('.ticket-respuesta').value.trim(),
+            }),
+        });
+        if (response.ok) {
+            await loadMesaAyuda();
+            return;
+        }
+        error.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo guardar.');
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+// ---------- Calendario ----------
+
+const BADGES_EVENTO = {
+    examen: 'badge-live',
+    entrega: 'badge-scheduled',
+    clase: 'badge-completed',
+    evento: 'badge-completed',
+};
+
+async function loadCalendario() {
+    const container = document.getElementById('calendario-contenido');
+    if (!container) return;
+    container.innerHTML = '<p>Cargando…</p>';
+
+    let eventos;
+    try {
+        eventos = await getTodas('/calendario/?proximos=1');
+    } catch (error) {
+        console.error('Error cargando calendario:', error);
+        errorDeCarga(container, 'el calendario');
+        return;
+    }
+
+    let html = '<h3 style="margin-bottom: 1rem;">Próximos Eventos</h3>';
+    if (eventos.length === 0) {
+        html += '<p>No hay eventos próximos.</p>';
+    }
+
+    eventos.forEach(evento => {
+        const inicio = new Date(evento.fecha_inicio);
+        const fin = new Date(evento.fecha_fin);
+        const hora = { hour: '2-digit', minute: '2-digit' };
+        const horario = inicio.toDateString() === fin.toDateString()
+            ? `${inicio.toLocaleTimeString('es-MX', hora)} – ${fin.toLocaleTimeString('es-MX', hora)}`
+            : `hasta el ${fin.toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
+        html += `
+            <div class="clase-item">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(evento.titulo)}</div>
+                    <div class="clase-badge ${BADGES_EVENTO[evento.tipo_evento] || 'badge-completed'}">
+                        ${escapeHtml(inicio.toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' }))}
+                    </div>
+                </div>
+                <div style="color: var(--gray-700); font-size: 0.85rem;">${escapeHtml(evento.tipo_evento_nombre)} · ${escapeHtml(horario)}</div>
+                <div style="margin-top: 0.25rem;">${escapeHtml(evento.descripcion)}</div>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+}
+
+// ---------- Centro de Idiomas ----------
+
+let cursosIdiomas = [];
+
+const ESTILO_IDIOMA = {
+    ingles: { bandera: '🇬🇧', fondo: '#dbeafe' },
+    frances: { bandera: '🇫🇷', fondo: '#fef3c7' },
+    aleman: { bandera: '🇩🇪', fondo: '#fce7f3' },
+    italiano: { bandera: '🇮🇹', fondo: '#dcfce7' },
+    japones: { bandera: '🇯🇵', fondo: '#fee2e2' },
+    mandarin: { bandera: '🇨🇳', fondo: '#fef9c3' },
+};
+
+const formatoPrecio = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' });
+
+async function loadIdiomas() {
+    const container = document.getElementById('idiomas-contenido');
+    if (!container) return;
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    try {
+        cursosIdiomas = await getTodas('/idiomas/');
+    } catch (error) {
+        console.error('Error cargando idiomas:', error);
+        errorDeCarga(container, 'el centro de idiomas');
+        return;
+    }
+    renderIdiomas();
+}
+
+function renderIdiomas() {
+    const container = document.getElementById('idiomas-contenido');
+    if (cursosIdiomas.length === 0) {
+        container.innerHTML = '<div class="card"><p>No hay cursos de idiomas disponibles por ahora.</p></div>';
+        return;
+    }
+
+    container.innerHTML = '<div class="cards-grid">' + cursosIdiomas.map(curso => {
+        const estilo = ESTILO_IDIOMA[curso.idioma] || { bandera: '🌎', fondo: '#e0e7ff' };
+        const cupos = curso.cupos_disponibles;
+
+        let accion = '';
+        if (currentStudent) {
+            if (curso.inscrito) {
+                accion = `
+                    <p style="margin-top: 1rem; color: var(--success); font-weight: 600;">✅ Estás inscrito</p>
+                    <button type="button" class="btn-salir idioma-accion" data-accion="cancelar" data-curso-id="${escapeHtml(curso.id)}"
+                            style="margin-top: 0.5rem; width: 100%;">Cancelar inscripción</button>`;
+            } else if (cupos <= 0) {
+                accion = '<button type="button" class="btn btn-primary" disabled style="margin-top: 1rem; width: 100%; opacity: 0.6;">Sin cupo</button>';
+            } else {
+                accion = `
+                    <button type="button" class="btn btn-primary idioma-accion" data-accion="inscribir" data-curso-id="${escapeHtml(curso.id)}"
+                            style="margin-top: 1rem; width: 100%;">Inscribirme</button>`;
+            }
+            accion += '<p class="idioma-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem;"></p>';
+        }
+
+        return `
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-icon" style="background: ${estilo.fondo};">${estilo.bandera}</div>
+                    <div class="card-title">${escapeHtml(curso.nombre_curso)}</div>
+                </div>
+                <div class="card-description">
+                    <p>${escapeHtml(curso.idioma_nombre)} · Nivel ${escapeHtml(curso.nivel_nombre.toLowerCase())}</p>
+                    <p style="margin-top: 0.5rem;">${escapeHtml(curso.descripcion)}</p>
+                    <p style="margin-top: 0.5rem;"><strong>Instructor:</strong> ${escapeHtml(curso.instructor)}</p>
+                    <p><strong>Inicio:</strong> ${escapeHtml(formatearDia(curso.fecha_inicio))} · ${escapeHtml(curso.duracion_semanas)} semanas</p>
+                    <p><strong>Costo:</strong> ${escapeHtml(formatoPrecio.format(Number(curso.precio)))}</p>
+                    <p><strong>Cupos disponibles:</strong> ${escapeHtml(Math.max(cupos, 0))} de ${escapeHtml(curso.cupo_maximo)}</p>
+                    ${accion}
+                </div>
+            </div>
+        `;
+    }).join('') + '</div>';
+
+    container.querySelectorAll('.idioma-accion').forEach(boton => {
+        boton.addEventListener('click', () => cambiarInscripcion(boton));
+    });
+}
+
+async function cambiarInscripcion(boton) {
+    const { accion, cursoId } = boton.dataset;
+    if (accion === 'cancelar' && !confirm('¿Cancelar tu inscripción a este curso?')) return;
+
+    const error = boton.parentElement.querySelector('.idioma-error');
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api(`/idiomas/${encodeURIComponent(cursoId)}/${accion}/`, { method: 'POST' });
+        const datos = await response.json().catch(() => ({}));
+        if (response.ok) {
+            // La API devuelve el curso actualizado (cupos e "inscrito")
+            cursosIdiomas = cursosIdiomas.map(c => (String(c.id) === cursoId ? datos : c));
+            renderIdiomas();
+            return;
+        }
+        error.textContent = mensajeDeError(datos, 'No se pudo completar la operación.');
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
 }
 
 window.addEventListener('DOMContentLoaded', () => {

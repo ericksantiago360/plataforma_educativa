@@ -4,7 +4,8 @@ from estudiantes.models import Estudiante
 from cursos.models import Curso
 from coordinacion.models import Tarea, Comunicado
 from academico.models import Materia, ControlEscolar, ClaseEnLinea, ForoClase, MensajeForo
-from perfiles.models import PerfilEstudiante
+from perfiles.models import PerfilEstudiante, Tutor, AsignacionTutor
+from servicios.models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
 from django.db.models import Avg
 from django.utils import timezone
 from datetime import datetime, timedelta
@@ -185,6 +186,70 @@ for estudiante, programa in programas.items():
         progreso_academico=round(aprobadas * 100 / MATERIAS_DEL_PLAN),
         promedio=round(promedio, 2),
     )
+
+# Tutores
+tutor_lucia = Tutor.objects.create(nombre='Lucía Hernández Mora', email='lucia.hernandez@universidad.edu',
+                                   telefono='555-201-3040', especialidad='Ciencias Económico-Administrativas')
+tutor_raul = Tutor.objects.create(nombre='Raúl Domínguez Paz', email='raul.dominguez@universidad.edu',
+                                  telefono='555-201-3055', especialidad='Contaduría y Finanzas')
+AsignacionTutor.objects.create(estudiante=est1, tutor=tutor_lucia)
+AsignacionTutor.objects.create(estudiante=est2, tutor=tutor_raul)
+AsignacionTutor.objects.create(estudiante=est3, tutor=tutor_raul)
+
+# Biblioteca digital
+recursos = [
+    ('Administración: una perspectiva global', 'Harold Koontz', 'Administración', 'libro',
+     'Texto clásico sobre el proceso administrativo.', 'https://openlibrary.org/search?q=koontz+administracion', '2012-01-01'),
+    ('Contabilidad Financiera', 'Gerardo Guajardo', 'Contabilidad', 'libro',
+     'Fundamentos de contabilidad y estados financieros.', 'https://openlibrary.org/search?q=guajardo+contabilidad', '2014-06-01'),
+    ('Revista de Contaduría y Administración', 'UNAM', 'Contabilidad', 'revista',
+     'Publicación académica arbitrada de la FCA-UNAM.', 'https://www.cya.unam.mx', '2024-01-01'),
+    ('La teoría de los dos factores de Herzberg', 'Varios autores', 'Administración', 'articulo',
+     'Revisión de la teoría de motivación e higiene.', 'https://scholar.google.com/scholar?q=Herzberg+two+factor+theory', '2019-03-15'),
+    ('Introducción al costeo por órdenes', 'Canal académico', 'Contabilidad', 'video',
+     'Video explicativo del costeo por órdenes de producción.', 'https://www.youtube.com/results?search_query=costeo+por+ordenes', '2021-09-01'),
+]
+for titulo, autor, categoria, tipo, descripcion, url, fecha in recursos:
+    BibliotecaDigital.objects.create(titulo=titulo, autor=autor, categoria=categoria, tipo_recurso=tipo,
+                                     descripcion=descripcion, url_recurso=url, fecha_publicacion=fecha)
+
+# Calendario: eventos generales y de cada curso
+evento_general = EventoCalendario.objects.create(
+    titulo='Cierre del periodo 2026-2', descripcion='Último día para entregar actividades del periodo.',
+    tipo_evento='evento', todos_estudiantes=True,
+    fecha_inicio=ahora + timedelta(days=20), fecha_fin=ahora + timedelta(days=20, hours=23))
+examen_adm = EventoCalendario.objects.create(
+    titulo='Examen parcial de Comportamiento Organizacional', descripcion='Unidades 1 a 3.',
+    tipo_evento='examen', fecha_inicio=ahora + timedelta(days=6), fecha_fin=ahora + timedelta(days=6, hours=2))
+examen_adm.cursos.add(curso1)
+entrega_con = EventoCalendario.objects.create(
+    titulo='Entrega: hoja de costos', descripcion='Subir el ejercicio de la sesión 2.',
+    tipo_evento='entrega', fecha_inicio=ahora + timedelta(days=4), fecha_fin=ahora + timedelta(days=4, hours=23))
+entrega_con.cursos.add(curso2)
+
+# Centro de idiomas
+hoy = timezone.localdate()
+ingles = CentroIdiomas.objects.create(idioma='ingles', nivel='basico', nombre_curso='Inglés A1',
+                                      descripcion='Comunicación básica: presentaciones, rutinas y descripciones.',
+                                      duracion_semanas=12, precio=1500, instructor='Mtra. Laura Smith',
+                                      cupo_maximo=25, fecha_inicio=hoy + timedelta(days=15))
+CentroIdiomas.objects.create(idioma='frances', nivel='basico', nombre_curso='Francés A1',
+                             descripcion='Primeros pasos en francés con enfoque conversacional.',
+                             duracion_semanas=12, precio=1500, instructor='Mtro. Pierre Dubois',
+                             cupo_maximo=20, fecha_inicio=hoy + timedelta(days=30))
+aleman = CentroIdiomas.objects.create(idioma='aleman', nivel='intermedio', nombre_curso='Alemán B1',
+                                      descripcion='Grupo reducido para nivel intermedio.',
+                                      duracion_semanas=16, precio=1800, instructor='Mtra. Anna Becker',
+                                      cupo_maximo=2, fecha_inicio=hoy + timedelta(days=45))
+ingles.estudiantes_inscritos.add(est2)
+aleman.estudiantes_inscritos.add(est1, est3)  # grupo lleno, para ver el "Sin cupo"
+
+# Mesa de ayuda: un ticket respondido y uno abierto
+MesaAyuda.objects.create(estudiante=est2, categoria='tecnico', asunto='No puedo ver la grabación de la sesión 2',
+                         descripcion='Al abrir la grabación aparece un error de permisos.',
+                         estado='resuelto', respuesta='Ya quedó corregido el permiso. Intenta de nuevo, por favor.')
+MesaAyuda.objects.create(estudiante=est2, categoria='administrativo', asunto='Constancia de estudios',
+                         descripcion='Necesito una constancia de estudios para mi trabajo.')
 
 print("✅ Datos de ejemplo creados exitosamente")
 print("\nUsuarios de prueba (usuario / contraseña):")

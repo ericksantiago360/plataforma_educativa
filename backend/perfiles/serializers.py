@@ -19,7 +19,9 @@ class TutorSerializer(serializers.ModelSerializer):
 class AsignacionTutorSerializer(serializers.ModelSerializer):
     tutor_nombre = serializers.CharField(source='tutor.nombre', read_only=True)
     tutor_email = serializers.CharField(source='tutor.email', read_only=True)
-    
+    tutor_telefono = serializers.CharField(source='tutor.telefono', read_only=True)
+    tutor_especialidad = serializers.CharField(source='tutor.especialidad', read_only=True)
+
     class Meta:
         model = AsignacionTutor
         fields = '__all__'

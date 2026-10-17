@@ -125,7 +125,10 @@ Las peticiones `POST`, `PUT`, `PATCH` y `DELETE` deben enviar el header `X-CSRFT
 | servicios | `biblioteca/`, `mesa-ayuda/`, `calendario/`, `idiomas/` |
 | academico | `materias/`, `clases/`, `foros/`, `mensajes-foro/`, `control-escolar/` |
 
-`mensajes-foro/` acepta `?foro=<id>` para traer solo los mensajes de un foro.
+Filtros y acciones extra:
+- `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
+- `calendario/?proximos=1` omite los eventos que ya terminaron.
+- `POST idiomas/<id>/inscribir/` y `POST idiomas/<id>/cancelar/` inscriben o dan de baja al estudiante de la sesión (respetando el cupo).
 
 ---
 
@@ -147,7 +150,10 @@ Las cuentas las crea Control Escolar desde el panel de administración: primero 
 | Control escolar | Su historial (lectura) | Sus materias (edita calificaciones) | Todo |
 | Mensajes de foro | Publica, edita y borra los suyos | Publica y edita los suyos; borra cualquiera de sus cursos (moderar) | Todo |
 | Mesa de ayuda | Abre y ve sus tickets | — | Todo (responde y cambia el estado) |
-| Biblioteca, calendario, idiomas, comunicados | Lectura | Lectura | Todo |
+| Calendario | Eventos generales y de sus cursos | Eventos generales y de sus cursos | Todo |
+| Centro de idiomas | Ve los cursos activos; se inscribe y cancela | Ve los cursos activos | Todo (incluida la lista de inscritos) |
+| Mi tutor | Sus tutores asignados | Tutores de sus alumnos | Todo |
+| Biblioteca, comunicados | Lectura (biblioteca: solo recursos activos) | Lectura | Todo |
 
 Si un usuario pide un registro que no le corresponde, la API responde **404** (no revela que existe). El autor de mensajes y tickets siempre se toma de la sesión, nunca de lo que envía el navegador.
 
@@ -286,14 +292,26 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 
 ### Pruebas Automáticas
 ```bash
-docker-compose exec backend python manage.py test cuentas
+docker-compose exec backend python manage.py test
 ```
+
+Son 40 pruebas: autenticación y permisos (`cuentas/tests.py`) y servicios (`servicios/tests.py`).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
 docker-compose exec db mysql -uroot -proot_password \
   -e "GRANT ALL PRIVILEGES ON test_plataforma_universitaria.* TO 'admin_user'@'%';"
 ```
+
+### Solución de Problemas
+
+| Síntoma (en `docker-compose logs backend`) | Causa | Solución |
+|---|---|---|
+| `SECRET_KEY not found` | Falta `SECRET_KEY` en `backend/.env` | Agrégala (ver Puesta en Marcha, paso 1) y `docker-compose up -d backend` |
+| `No module named 'jwt'` u otro `ModuleNotFoundError` | La imagen se construyó antes de cambiar `requirements.txt` | `docker-compose up -d --build` |
+| `no such table` / `Unknown column` | Faltan migraciones | `docker-compose exec backend python manage.py migrate` |
+| El seed falla con `Duplicate entry` | El seed ya se había ejecutado | `docker-compose down -v` (⚠️ borra los datos) y repetir la Puesta en Marcha |
+| Los estudiantes no pueden iniciar sesión | Su registro no tiene `usuario` enlazado | Crear el usuario en el admin y enlazarlo al estudiante |
 
 ### Reiniciar Servicios
 ```bash
@@ -374,7 +392,12 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - ✅ **Control Escolar:** historial con calificaciones (estudiante) o calificaciones de sus grupos (profesor)
 - ✅ **Foro de Clase:** foros de tus cursos; publicar, editar y eliminar mensajes; los mensajes de profesores llevan etiqueta
 - ✅ **Clases en Línea:** lista de clases de Zoom
-- 🔄 **Biblioteca, Mi Tutor, Mesa de Ayuda, Calendario e Idiomas:** todavía muestran contenido de ejemplo (sus endpoints ya existen)
+- ✅ **Biblioteca Digital:** recursos con buscador y filtro por tipo
+- ✅ **Mi Tutor:** datos del tutor asignado y botón para solicitar cita por correo
+- ✅ **Mesa de Ayuda:** el estudiante abre tickets y ve las respuestas; el staff responde y cambia el estado
+- ✅ **Calendario:** próximos eventos generales y de tus cursos
+- ✅ **Centro de Idiomas:** cursos con cupos; inscribirse y cancelar la inscripción
+- 🔄 **Banner de período del inicio:** todavía es texto fijo
 
 ### Perfil del Estudiante
 - ✅ Avatar con iniciales
@@ -391,9 +414,8 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 ## 🔧 Próximas Mejoras Sugeridas
 
 ### Funcionalidades Prioritarias
-1. **Conectar las secciones restantes**
-   - Biblioteca, Mi Tutor, Mesa de Ayuda, Calendario e Idiomas
-   - Abrir tickets de ayuda desde el frontend
+1. **Banner de período dinámico**
+   - Tomar el periodo actual del perfil y la fecha límite del calendario
 
 2. **Formularios Completos**
    - Crear estudiantes desde frontend
@@ -467,9 +489,11 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Historial académico (Control Escolar)
 - [x] Foro de clase funcional
 - [x] Pruebas automáticas de permisos
+- [x] Biblioteca, Tutor, Mesa de Ayuda, Calendario e Idiomas conectados a la API
+- [x] Inscripción a cursos de idiomas con control de cupo
 
 ### Pendientes 🔄
-- [ ] Conectar Biblioteca, Tutor, Mesa de Ayuda, Calendario e Idiomas
+- [ ] Banner de período dinámico
 - [ ] Formularios de creación
 - [ ] Captura de calificaciones desde el frontend
 - [ ] Corregir integración con Zoom
@@ -488,7 +512,8 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 2. Guarda backups de la base de datos regularmente
 3. Prueba en el panel de admin antes del frontend
 4. Usa Postman para probar la API (inicia sesión con `/api/auth/login/` y envía el header `X-CSRFToken`)
-5. Corre `python manage.py test cuentas` después de cambiar permisos
+5. Corre `python manage.py test` después de cambiar permisos
+6. Si cambias `requirements.txt`, reconstruye la imagen con `docker-compose up -d --build`
 
 ### Para Producción
 1. Pon `DEBUG=False` en `backend/.env` (activa cookies solo por HTTPS)

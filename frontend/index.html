@@ -604,26 +604,7 @@
             <!-- Biblioteca Section -->
             <div id="biblioteca" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">📚 Biblioteca Digital</h2>
-                <div class="clases-list">
-                    <p style="margin-bottom: 1rem;">Accede a más de 890,000 libros, revistas y artículos digitales</p>
-                    <div class="cards-grid">
-                        <div class="card">
-                            <h4>Libros</h4>
-                            <p>Catálogo completo de libros académicos</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem;">Explorar</button>
-                        </div>
-                        <div class="card">
-                            <h4>Revistas</h4>
-                            <p>Publicaciones periódicas especializadas</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem;">Ver Revistas</button>
-                        </div>
-                        <div class="card">
-                            <h4>Artículos</h4>
-                            <p>Artículos científicos y académicos</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem;">Buscar</button>
-                        </div>
-                    </div>
-                </div>
+                <div class="clases-list" id="biblioteca-contenido"><p>Cargando…</p></div>
             </div>
 
             <!-- Control Escolar Section -->
@@ -658,119 +639,25 @@
             <!-- Mi Tutor Section -->
             <div id="tutor" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">👨‍🏫 Mi Tutor</h2>
-                <div class="card">
-                    <div class="card-header">
-                        <div class="user-avatar" style="width: 60px; height: 60px; font-size: 1.5rem;">JM</div>
-                        <div>
-                            <h3>José Martínez González</h3>
-                            <p style="color: var(--gray-700);">Tutor Académico</p>
-                        </div>
-                    </div>
-                    <div style="margin-top: 1.5rem;">
-                        <p><strong>Email:</strong> jose.martinez@universidad.edu</p>
-                        <p><strong>Teléfono:</strong> 555-1234-5678</p>
-                        <p><strong>Especialidad:</strong> Ciencias Sociales</p>
-                        <p style="margin-top: 1rem;">Horario de atención: Lunes a Viernes, 9:00 AM - 5:00 PM</p>
-                    </div>
-                    <button class="btn btn-primary" style="margin-top: 1.5rem;">Solicitar Cita</button>
-                </div>
+                <div id="tutor-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Mesa de Ayuda Section -->
             <div id="ayuda" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">🆘 Mesa de Ayuda</h2>
-                <div class="card">
-                    <h3>Crear Nuevo Ticket</h3>
-                    <form style="margin-top: 1rem;">
-                        <div style="margin-bottom: 1rem;">
-                            <label style="display: block; margin-bottom: 0.5rem;">Categoría</label>
-                            <select style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;">
-                                <option>Soporte Técnico</option>
-                                <option>Académico</option>
-                                <option>Administrativo</option>
-                                <option>Otro</option>
-                            </select>
-                        </div>
-                        <div style="margin-bottom: 1rem;">
-                            <label style="display: block; margin-bottom: 0.5rem;">Asunto</label>
-                            <input type="text" placeholder="Describe tu problema brevemente" style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;">
-                        </div>
-                        <div style="margin-bottom: 1rem;">
-                            <label style="display: block; margin-bottom: 0.5rem;">Descripción</label>
-                            <textarea rows="4" placeholder="Describe tu problema en detalle" style="width: 100%; padding: 0.75rem; border: 1px solid var(--gray-200); border-radius: 8px;"></textarea>
-                        </div>
-                        <button class="btn btn-primary" type="submit">Enviar Ticket</button>
-                    </form>
-                </div>
+                <div id="ayuda-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Calendario Section -->
             <div id="calendario" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">📅 Calendario Académico</h2>
-                <div class="clases-list">
-                    <h3 style="margin-bottom: 1rem;">Próximos Eventos</h3>
-                    <div class="clase-item">
-                        <div class="clase-header">
-                            <div class="clase-title">Entrega de Actividades</div>
-                            <div class="clase-badge badge-scheduled">22/10/2025</div>
-                        </div>
-                        <div>Fecha límite para entregar actividades del período actual</div>
-                    </div>
-                    <div class="clase-item">
-                        <div class="clase-header">
-                            <div class="clase-title">Inicio de Clases - Nuevo Período</div>
-                            <div class="clase-badge badge-scheduled">27/10/2025</div>
-                        </div>
-                        <div>Comienza el siguiente módulo: Conociendo la Biodiversidad</div>
-                    </div>
-                    <div class="clase-item">
-                        <div class="clase-header">
-                            <div class="clase-title">Examen Parcial</div>
-                            <div class="clase-badge badge-scheduled">15/11/2025</div>
-                        </div>
-                        <div>Evaluación del primer parcial</div>
-                    </div>
-                </div>
+                <div class="clases-list" id="calendario-contenido"><p>Cargando…</p></div>
             </div>
 
             <!-- Centro de Idiomas Section -->
             <div id="idiomas" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">🌎 Centro de Idiomas</h2>
-                <div class="cards-grid">
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-icon" style="background: #dbeafe; color: var(--primary);">🇬🇧</div>
-                            <div class="card-title">Inglés</div>
-                        </div>
-                        <div class="card-description">
-                            <p>Niveles: Básico, Intermedio, Avanzado</p>
-                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 1 de Noviembre</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-icon" style="background: #fef3c7; color: var(--warning);">🇫🇷</div>
-                            <div class="card-title">Francés</div>
-                        </div>
-                        <div class="card-description">
-                            <p>Niveles: Básico, Intermedio, Avanzado</p>
-                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 15 de Noviembre</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header">
-                            <div class="card-icon" style="background: #fce7f3; color: #ec4899;">🇩🇪</div>
-                            <div class="card-title">Alemán</div>
-                        </div>
-                        <div class="card-description">
-                            <p>Niveles: Básico, Intermedio</p>
-                            <p style="margin-top: 0.5rem;"><strong>Próximo inicio:</strong> 1 de Diciembre</p>
-                            <button class="btn btn-primary" style="margin-top: 1rem; width: 100%;">Inscribirme</button>
-                        </div>
-                    </div>
-                </div>
+                <div id="idiomas-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Clases en Línea Section -->

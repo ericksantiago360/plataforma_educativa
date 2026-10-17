@@ -66,7 +66,8 @@ function mostrarUsuario(usuario) {
             avatar.alt = nombre;
         }
     } else if (infoEstudiante) {
-        infoEstudiante.style.display = 'none';
+        // Sin estudiante no hay tarjeta de perfil: se oculta todo el encabezado para no dejar la franja vacía
+        (infoEstudiante.closest('.sidebar-header') || infoEstudiante).style.display = 'none';
     }
 }
 
