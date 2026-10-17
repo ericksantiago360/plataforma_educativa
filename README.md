@@ -354,6 +354,10 @@ docker-compose exec db mysql -uroot -proot_password \
 | Un adjunto da error 413 al subirlo | Supera `client_max_body_size` de nginx (210 MB) | Usa un archivo más pequeño o un enlace de YouTube para videos largos |
 | Los adjuntos responden en blanco al abrirlos por el puerto 8000 | Con `SERVIR_ARCHIVOS_CON_NGINX=True` el archivo lo envía nginx | Entra siempre por http://localhost (puerto 80) |
 | El editor de texto aparece como un cuadro simple | No cargó TinyMCE desde el CDN (sin internet) | Revisa la conexión; mientras tanto se puede escribir texto simple |
+| "Usuario o contraseña incorrectos" con una cuenta que antes funcionaba | La contraseña se cambió (por ejemplo, con "Cambiar contraseña" del panel, que no queda en el historial) | Asigna una nueva: `docker-compose exec backend python manage.py changepassword <usuario>` |
+| "Demasiados intentos. Espera un minuto…" | Límite de 5 intentos de login por minuto **por equipo** (todas las cuentas desde la misma IP cuentan juntas) | Espera un minuto y vuelve a intentar |
+| El login falla con `CSRF cookie not set` en los logs | La página de login llevaba mucho tiempo abierta o se borraron las cookies | Recarga `login.html` antes de iniciar sesión |
+| http://localhost/admin/ muestra el campus y no el panel de Django | nginx solo reenvía `/api` al backend | Usa http://localhost:8000/admin/ |
 
 ### Reiniciar Servicios
 ```bash
