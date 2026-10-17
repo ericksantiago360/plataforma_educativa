@@ -12,6 +12,7 @@ class MesaAyudaSerializer(serializers.ModelSerializer):
     class Meta:
         model = MesaAyuda
         fields = '__all__'
+        read_only_fields = ['estudiante']
 
 class EventoCalendarioSerializer(serializers.ModelSerializer):
     class Meta:

@@ -3,6 +3,6 @@ from .models import Estudiante
 
 @admin.register(Estudiante)
 class EstudianteAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'apellido', 'matricula', 'email', 'activo')
+    list_display = ('nombre', 'apellido', 'matricula', 'email', 'usuario', 'activo')
     search_fields = ('nombre', 'apellido', 'matricula', 'email')
     list_filter = ('activo', 'fecha_inscripcion')

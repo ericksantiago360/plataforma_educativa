@@ -287,6 +287,7 @@
     <script src="https://source.zoom.us/3.8.10/lib/vendor/redux-thunk.min.js"></script>
     <script src="https://source.zoom.us/3.8.10/lib/vendor/lodash.min.js"></script>
     <script src="https://source.zoom.us/zoom-meeting-embedded-3.8.10.min.js"></script>
+    <script src="js/auth.js"></script>
 
     <script>
         const API_BASE = '/api';
@@ -359,6 +360,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken'),
                     },
                     body: JSON.stringify({
                         user_name: userName,

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from estudiantes.models import Estudiante
 from cursos.models import Curso
@@ -50,16 +51,28 @@ class ForoClase(models.Model):
 
 class MensajeForo(models.Model):
     foro = models.ForeignKey(ForoClase, on_delete=models.CASCADE, related_name='mensajes')
-    estudiante = models.ForeignKey(Estudiante, on_delete=models.CASCADE, related_name='mensajes_foro')
+    # Quien publica: estudiante, profesor o staff. Define quién puede editar el mensaje.
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='mensajes_publicados')
+    # Solo se llena cuando publica un estudiante (conserva el vínculo con su expediente)
+    estudiante = models.ForeignKey(Estudiante, on_delete=models.CASCADE, null=True, blank=True, related_name='mensajes_foro')
     contenido = models.TextField()
     fecha_publicacion = models.DateTimeField(auto_now_add=True)
     editado = models.BooleanField(default=False)
-    
+
     class Meta:
         ordering = ['fecha_publicacion']
-    
+
+    @property
+    def autor_nombre(self):
+        if self.estudiante:
+            return f"{self.estudiante.nombre} {self.estudiante.apellido}"
+        if self.autor:
+            return self.autor.get_full_name() or self.autor.username
+        return 'Usuario eliminado'
+
     def __str__(self):
-        return f"{self.estudiante.nombre} - {self.foro.titulo}"
+        return f"{self.autor_nombre} - {self.foro.titulo}"
 
 class ControlEscolar(models.Model):
     estudiante = models.ForeignKey(Estudiante, on_delete=models.CASCADE, related_name='historial_escolar')

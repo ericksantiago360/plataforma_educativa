@@ -1,36 +1,61 @@
-const API_BASE = '/api';
-
+let usuarioActual = null;
 let currentStudent = null;
 let courses = [];
 let tasks = [];
 
-async function init() {
-    await loadStudentData();
-    await loadCourses();
-    await loadTasks();
-    updateDashboard();
+// Escapa texto de la API antes de insertarlo con innerHTML (evita XSS)
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
-async function loadStudentData() {
-    try {
-        const response = await fetch(`${API_BASE}/estudiantes/`);
-        const data = await response.json();
-        const students = data.results || data;
-        
-        if (students.length > 0) {
-            currentStudent = students[0];
-            updateStudentProfile(currentStudent);
-        }
-    } catch (error) {
-        console.error('Error cargando estudiante:', error);
+// Pide una lista a la API con api() de auth.js (cookie de sesión + CSRF)
+async function getLista(ruta) {
+    const response = await api(ruta);
+    if (!response.ok) {
+        throw new Error(`${ruta} respondió ${response.status}`);
     }
+    const data = await response.json();
+    return data.results || data;
+}
+
+// Como getLista, pero recorre todas las páginas (la API pagina de 10 en 10)
+async function getTodas(ruta) {
+    const todas = [];
+    let siguiente = ruta;
+    while (siguiente) {
+        const response = await api(siguiente);
+        if (!response.ok) {
+            throw new Error(`${siguiente} respondió ${response.status}`);
+        }
+        const data = await response.json();
+        if (!data.results) return data;  // respuesta sin paginar
+        todas.push(...data.results);
+        // "next" viene como URL absoluta; api() espera la ruta sin el prefijo /api
+        siguiente = data.next ? new URL(data.next).pathname.replace(/^\/api/, '') + new URL(data.next).search : null;
+    }
+    return todas;
+}
+
+async function init() {
+    // verificarSesion() ya pinta nombre y rol; si no hay sesión redirige al login
+    const usuario = await verificarSesion();
+    if (!usuario) return;
+    usuarioActual = usuario;
+    currentStudent = usuario.estudiante;
+
+    const [, , perfil] = await Promise.all([loadCourses(), loadTasks(), loadPerfil()]);
+    updatePerfil(perfil);
+    updateDashboard(usuario);
 }
 
 async function loadCourses() {
     try {
-        const response = await fetch(`${API_BASE}/cursos/`);
-        const data = await response.json();
-        courses = data.results || data;
+        courses = await getLista('/cursos/');
     } catch (error) {
         console.error('Error cargando cursos:', error);
     }
@@ -38,54 +63,64 @@ async function loadCourses() {
 
 async function loadTasks() {
     try {
-        const response = await fetch(`${API_BASE}/tareas/`);
-        const data = await response.json();
-        tasks = data.results || data;
+        tasks = await getLista('/tareas/');
     } catch (error) {
         console.error('Error cargando tareas:', error);
     }
 }
 
-function updateStudentProfile(student) {
-    const studentNameElement = document.querySelector('.student-name');
-    if (studentNameElement) {
-        studentNameElement.textContent = `${student.nombre} ${student.apellido}`;
+// Solo los estudiantes tienen perfil académico; la API ya devuelve únicamente el propio
+async function loadPerfil() {
+    if (!currentStudent) return null;
+    try {
+        const perfiles = await getLista('/perfiles/');
+        return perfiles[0] || null;
+    } catch (error) {
+        console.error('Error cargando perfil:', error);
+        return null;
     }
-    
-    const studentIdElement = document.querySelector('.student-id');
-    if (studentIdElement) {
-        studentIdElement.textContent = `Matrícula: ${student.matricula}`;
-    }
-    
-    const headerName = document.querySelector('.user-profile div div:first-child');
-    if (headerName) {
-        headerName.textContent = `${student.nombre} ${student.apellido}`;
-    }
-    
-    const initials = `${student.nombre.charAt(0)}${student.apellido.charAt(0)}`;
-    document.querySelectorAll('.user-avatar').forEach(avatar => {
-        if (!avatar.querySelector('img')) {
-            avatar.textContent = initials;
-        }
-    });
 }
 
-function updateDashboard() {
-    const totalCoursesElement = document.querySelector('.stat-card:nth-child(2) .stat-value');
-    if (totalCoursesElement) {
-        totalCoursesElement.textContent = courses.length;
+function updatePerfil(perfil) {
+    const asignar = (selector, texto) => {
+        const el = document.querySelector(selector);
+        if (el) el.textContent = texto;
+    };
+
+    if (!perfil) {
+        asignar('.student-program', 'Sin perfil académico');
+        return;
     }
-    
-    const pendingTasks = tasks.filter(t => t.estado === 'pendiente').length;
-    const pendingTasksElement = document.querySelector('.stat-card:nth-child(3) .stat-value');
-    if (pendingTasksElement) {
-        pendingTasksElement.textContent = pendingTasks;
+
+    const progreso = Math.max(0, Math.min(100, perfil.progreso_academico));
+    asignar('#stat-cursadas', perfil.materias_cursadas);
+    asignar('#stat-totales', perfil.materias_totales);
+    asignar('#stat-progreso', `${progreso}%`);
+    asignar('#stat-promedio', Number(perfil.promedio).toFixed(1));
+
+    asignar('.student-program', perfil.programa);
+    asignar('.progress-text', `${progreso}%`);
+    asignar('#progress-materias', `${perfil.materias_cursadas} de ${perfil.materias_totales} Materias`);
+
+    // El arco mide 251 (≈ 2π·40); el offset es la parte sin completar
+    const arco = document.getElementById('progress-arc');
+    if (arco) arco.setAttribute('stroke-dashoffset', String(251 * (1 - progreso / 100)));
+}
+
+function updateDashboard(usuario) {
+    const nombre = currentStudent ? currentStudent.nombre : usuario.nombre;
+    const bannerTitle = document.querySelector('#inicio .banner-text h2');
+    if (bannerTitle) {
+        bannerTitle.textContent = `¡Bienvenido/a ${nombre}!`;
     }
-    
+
     if (currentStudent) {
-        const bannerTitle = document.querySelector('.banner-text h2');
-        if (bannerTitle && bannerTitle.textContent.includes('Próximo')) {
-            bannerTitle.textContent = `¡Bienvenido/a ${currentStudent.nombre}!`;
+        const pendientes = tasks.filter(t => t.estado === 'pendiente').length;
+        const bannerText = document.querySelector('#inicio .banner-text p');
+        if (bannerText) {
+            bannerText.textContent = pendientes === 1
+                ? 'Tienes 1 tarea pendiente'
+                : `Tienes ${pendientes} tareas pendientes`;
         }
     }
 }
@@ -124,29 +159,59 @@ function showSection(sectionId) {
     }
 }
 
+// Badge según el estado del registro en Control Escolar
+const ESTADOS_ESCOLARES = {
+    aprobado: { clase: 'badge-completed', texto: 'Aprobado' },
+    cursando: { clase: 'badge-scheduled', texto: 'Cursando' },
+    reprobado: { clase: 'badge-live', texto: 'Reprobado' },
+    baja: { clase: 'badge-neutral', texto: 'Baja' },
+};
+
 async function loadControlEscolar() {
     const container = document.querySelector('#control .clases-list');
-    if (!container || courses.length === 0) return;
-    
-    let html = '<h3 style="margin-bottom: 1rem;">Mis Cursos</h3>';
-    
-    courses.forEach(course => {
+    if (!container) return;
+
+    // El estudiante ve su historial; profesor y staff, los registros de sus grupos
+    const titulo = currentStudent ? 'Historial Académico' : 'Calificaciones de mis grupos';
+    container.innerHTML = `<h3 style="margin-bottom: 1rem;">${titulo}</h3><p>Cargando…</p>`;
+
+    let registros;
+    try {
+        registros = await getTodas('/control-escolar/');
+    } catch (error) {
+        console.error('Error cargando control escolar:', error);
+        container.innerHTML = `<h3 style="margin-bottom: 1rem;">${titulo}</h3>`
+            + '<div class="card"><p style="color: red;">No se pudo cargar el historial.</p></div>';
+        return;
+    }
+
+    let html = `<h3 style="margin-bottom: 1rem;">${titulo}</h3>`;
+
+    if (registros.length === 0) {
+        html += '<div class="card"><p>Aún no hay materias registradas.</p></div>';
+    }
+
+    registros.forEach(registro => {
+        const estado = ESTADOS_ESCOLARES[registro.estado] || { clase: 'badge-neutral', texto: registro.estado };
+        const badge = registro.calificacion !== null
+            ? `${estado.texto} - ${Number(registro.calificacion).toFixed(1)}`
+            : estado.texto;
+        const alumno = currentStudent
+            ? ''
+            : `<div>Estudiante: ${escapeHtml(registro.estudiante_nombre)} ${escapeHtml(registro.estudiante_apellido)}</div>`;
+
         html += `
             <div class="clase-item">
                 <div class="clase-header">
-                    <div class="clase-title">${course.nombre}</div>
-                    <div class="clase-badge badge-live">Cursando</div>
+                    <div class="clase-title">${escapeHtml(registro.materia_nombre)}</div>
+                    <div class="clase-badge ${estado.clase}">${escapeHtml(badge)}</div>
                 </div>
-                <div style="margin-top: 0.5rem;">
-                    <p><strong>Código:</strong> ${course.codigo}</p>
-                    <p><strong>Profesor:</strong> ${course.profesor}</p>
-                    <p><strong>Créditos:</strong> ${course.creditos}</p>
-                    <p><strong>Estudiantes:</strong> ${course.cantidad_estudiantes || 0}</p>
-                </div>
+                ${alumno}
+                <div>Período: ${escapeHtml(registro.periodo)}</div>
             </div>
         `;
     });
-    
+
     container.innerHTML = html;
 }
 
@@ -157,10 +222,7 @@ function abrirClaseZoom(claseId) {
 
 async function cargarClasesZoom() {
     try {
-        console.log('Cargando clases Zoom...');
-        const response = await fetch(`${API_BASE}/clases-zoom/`);
-        const data = await response.json();
-        const clases = data.results || data;
+        const clases = await getLista('/clases-zoom/');
         const container = document.querySelector('#clases .clases-list');
         
         if (!container) {
@@ -178,26 +240,20 @@ async function cargarClasesZoom() {
                                  clase.estado === 'programada' ? 'badge-scheduled' : 'badge-completed';
                 const estadoTexto = clase.estado === 'en_vivo' ? '🔴 EN VIVO' :
                                   clase.estado === 'programada' ? '📅 PROGRAMADA' : '✅ FINALIZADA';
-                
-                const btnElement = document.createElement('button');
-                btnElement.className = 'btn btn-primary';
-                btnElement.style.marginTop = '1rem';
-                btnElement.textContent = clase.estado === 'en_vivo' ? '🎥 Unirse Ahora' : '📋 Ver Detalles';
-                btnElement.setAttribute('data-clase-id', clase.id);
-                
+
                 html += `
                     <div class="clase-item">
                         <div class="clase-header">
-                            <div class="clase-title">${clase.titulo}</div>
+                            <div class="clase-title">${escapeHtml(clase.titulo)}</div>
                             <div class="clase-badge ${badgeClass}">${estadoTexto}</div>
                         </div>
                         <div style="margin-top: 0.5rem;">
-                            <p><strong>📚 Curso:</strong> ${clase.curso_nombre}</p>
-                            <p><strong>👨‍🏫 Profesor:</strong> ${clase.profesor}</p>
-                            <p><strong>⏱️ Duración:</strong> ${clase.duracion_minutos} minutos</p>
-                            <p><strong>👥 Participantes:</strong> ${clase.total_participantes} / ${clase.max_participantes}</p>
-                            <p><strong>📅 Fecha:</strong> ${new Date(clase.fecha_hora_inicio).toLocaleString('es-MX')}</p>
-                            <button class="btn btn-primary zoom-btn" data-clase-id="${clase.id}" style="margin-top: 1rem;">
+                            <p><strong>📚 Curso:</strong> ${escapeHtml(clase.curso_nombre)}</p>
+                            <p><strong>👨‍🏫 Profesor:</strong> ${escapeHtml(clase.profesor)}</p>
+                            <p><strong>⏱️ Duración:</strong> ${escapeHtml(clase.duracion_minutos)} minutos</p>
+                            <p><strong>👥 Participantes:</strong> ${escapeHtml(clase.total_participantes)} / ${escapeHtml(clase.max_participantes)}</p>
+                            <p><strong>📅 Fecha:</strong> ${escapeHtml(new Date(clase.fecha_hora_inicio).toLocaleString('es-MX'))}</p>
+                            <button class="btn btn-primary zoom-btn" data-clase-id="${escapeHtml(clase.id)}" style="margin-top: 1rem;">
                                 ${clase.estado === 'en_vivo' ? '🎥 Unirse Ahora' : '📋 Ver Detalles'}
                             </button>
                         </div>
@@ -227,74 +283,273 @@ async function cargarClasesZoom() {
     }
 }
 
+// ---------- Foro de clase ----------
+
+let foroActual = null;
+
+const ESTILO_ACCION = 'background: none; border: none; cursor: pointer; font-size: 0.85rem; padding: 0;';
+
+const FORO_TITULO = '<h3 style="margin-bottom: 1rem;">Foros de mis clases</h3>';
+
+function formatearFecha(iso) {
+    return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+// Etiqueta junto al nombre para distinguir a profesores y staff en la conversación
+const ETIQUETAS_AUTOR = {
+    profesor: 'Profesor',
+    staff: 'Administración',
+};
+
+function esMensajeMio(mensaje) {
+    return Boolean(usuarioActual) && mensaje.autor === usuarioActual.id;
+}
+
+function puedeEliminar(mensaje) {
+    const rol = usuarioActual && usuarioActual.rol;
+    if (rol === 'staff' || rol === 'profesor') return true;  // el profesor modera sus cursos (la API lo limita)
+    return esMensajeMio(mensaje);
+}
+
 async function loadForo() {
     const container = document.querySelector('#foro .clases-list');
-    if (!container || courses.length === 0) return;
-    
-    const firstCourse = courses[0];
-    
-    let html = `<h3 style="margin-bottom: 1rem;">${firstCourse.nombre} - Discusiones</h3>`;
-    
-    html += `
-        <div class="card" style="margin-bottom: 1rem;">
-            <div style="display: flex; gap: 1rem;">
-                <div class="user-avatar" style="width: 40px; height: 40px;">PR</div>
-                <div style="flex: 1;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                        <strong>${firstCourse.profesor} (Profesor)</strong>
-                        <span style="color: var(--gray-700); font-size: 0.85rem;">Hace 2 horas</span>
-                    </div>
-                    <p style="color: var(--gray-700);">Bienvenidos al foro de ${firstCourse.nombre}.</p>
-                    <div style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.85rem; color: var(--gray-700);">
-                        <span>👍 12 Me gusta</span>
-                        <span>💬 8 Respuestas</span>
-                    </div>
+    if (!container) return;
+    foroActual = null;
+    container.innerHTML = FORO_TITULO + '<p>Cargando…</p>';
+
+    let foros;
+    try {
+        foros = await getTodas('/foros/');
+    } catch (error) {
+        console.error('Error cargando foros:', error);
+        container.innerHTML = FORO_TITULO
+            + '<div class="card"><p style="color: red;">No se pudieron cargar los foros.</p></div>';
+        return;
+    }
+
+    let html = FORO_TITULO;
+    if (foros.length === 0) {
+        html += '<div class="card"><p>No hay foros en tus cursos.</p></div>';
+    }
+
+    foros.forEach(foro => {
+        const total = foro.total_mensajes;
+        html += `
+            <div class="clase-item foro-item" data-foro-id="${escapeHtml(foro.id)}" style="cursor: pointer;">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(foro.titulo)}</div>
+                    <div class="clase-badge ${foro.activo ? 'badge-completed' : 'badge-neutral'}">${foro.activo ? 'Abierto' : 'Cerrado'}</div>
+                </div>
+                <div>${escapeHtml(foro.materia_nombre)} · ${escapeHtml(foro.clase_titulo)}</div>
+                <div style="color: var(--gray-700); font-size: 0.85rem; margin-top: 0.25rem;">
+                    💬 ${total === 1 ? '1 mensaje' : `${escapeHtml(total)} mensajes`}
                 </div>
             </div>
-        </div>
+        `;
+    });
+
+    container.innerHTML = html;
+    container.querySelectorAll('.foro-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const foro = foros.find(f => String(f.id) === item.dataset.foroId);
+            abrirForo(foro);
+        });
+    });
+}
+
+async function abrirForo(foro) {
+    const container = document.querySelector('#foro .clases-list');
+    if (!container) return;
+    foroActual = foro;
+
+    const encabezado = `
+        <button type="button" class="btn btn-primary" id="foro-volver" style="margin-bottom: 1rem;">← Volver a los foros</button>
+        <h3 style="margin-bottom: 0.25rem;">${escapeHtml(foro.titulo)}</h3>
+        <p style="color: var(--gray-700); font-size: 0.9rem;">${escapeHtml(foro.materia_nombre)} · ${escapeHtml(foro.clase_titulo)}</p>
+        <p style="margin: 0.75rem 0 1.5rem;">${escapeHtml(foro.descripcion)}</p>
     `;
-    
-    if (currentStudent) {
+    container.innerHTML = encabezado + '<p>Cargando mensajes…</p>';
+    document.getElementById('foro-volver').addEventListener('click', loadForo);
+
+    let mensajes;
+    try {
+        mensajes = await getTodas(`/mensajes-foro/?foro=${encodeURIComponent(foro.id)}`);
+    } catch (error) {
+        console.error('Error cargando mensajes:', error);
+        container.innerHTML = encabezado
+            + '<div class="card"><p style="color: red;">No se pudieron cargar los mensajes.</p></div>';
+        document.getElementById('foro-volver').addEventListener('click', loadForo);
+        return;
+    }
+
+    let html = encabezado;
+    if (mensajes.length === 0) {
+        html += '<div class="card" style="margin-bottom: 1rem;"><p>Todavía no hay mensajes. ¡Sé el primero en participar!</p></div>';
+    }
+
+    mensajes.forEach(mensaje => {
+        const esMio = esMensajeMio(mensaje);
+        const iniciales = mensaje.autor_nombre.split(/\s+/).slice(0, 2).map(p => p.charAt(0)).join('').toUpperCase();
+        const etiqueta = ETIQUETAS_AUTOR[mensaje.autor_rol]
+            ? `<span class="clase-badge" style="background: var(--primary); color: white; margin-left: 0.5rem;">${ETIQUETAS_AUTOR[mensaje.autor_rol]}</span>`
+            : '';
         html += `
             <div class="card" style="margin-bottom: 1rem;">
                 <div style="display: flex; gap: 1rem;">
-                    <div class="user-avatar" style="width: 40px; height: 40px;">${currentStudent.nombre.charAt(0)}${currentStudent.apellido.charAt(0)}</div>
-                    <div style="flex: 1;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                            <strong>${currentStudent.nombre} ${currentStudent.apellido}</strong>
-                            <span style="color: var(--gray-700); font-size: 0.85rem;">Hace 5 horas</span>
+                    <div class="user-avatar" style="width: 40px; height: 40px; flex-shrink: 0;">${escapeHtml(iniciales)}</div>
+                    <div style="flex: 1; min-width: 0;">
+                        <div style="display: flex; justify-content: space-between; gap: 1rem; margin-bottom: 0.5rem;">
+                            <span><strong>${escapeHtml(mensaje.autor_nombre)}${esMio ? ' (tú)' : ''}</strong>${etiqueta}</span>
+                            <span style="color: var(--gray-700); font-size: 0.85rem;">
+                                ${escapeHtml(formatearFecha(mensaje.fecha_publicacion))}${mensaje.editado ? ' · editado' : ''}
+                            </span>
                         </div>
-                        <p style="color: var(--gray-700);">Excelente clase.</p>
-                        <div style="margin-top: 1rem; display: flex; gap: 1rem; font-size: 0.85rem; color: var(--gray-700);">
-                            <span>👍 5 Me gusta</span>
-                            <span>💬 3 Respuestas</span>
+                        <div class="foro-vista">
+                            <p style="color: var(--gray-700); white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(mensaje.contenido)}</p>
+                            <div style="display: flex; gap: 1rem; margin-top: 0.75rem;">
+                                ${esMio && foro.activo ? `
+                                    <button type="button" class="foro-editar" data-mensaje-id="${escapeHtml(mensaje.id)}"
+                                            style="${ESTILO_ACCION} color: var(--primary);">Editar</button>` : ''}
+                                ${puedeEliminar(mensaje) ? `
+                                    <button type="button" class="foro-eliminar" data-mensaje-id="${escapeHtml(mensaje.id)}"
+                                            style="${ESTILO_ACCION} color: var(--danger);">Eliminar</button>` : ''}
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         `;
+    });
+
+    if (!foro.activo) {
+        html += '<div class="card"><p>🔒 Este foro está cerrado y ya no recibe mensajes.</p></div>';
+    } else {
+        html += `
+            <div class="card">
+                <h4 style="margin-bottom: 1rem;">Nueva publicación</h4>
+                <textarea id="foro-texto" rows="3" maxlength="5000" placeholder="Escribe aquí..."
+                          style="width: 100%; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 0.5rem; font-family: inherit;"></textarea>
+                <p id="foro-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+                <button type="button" class="btn btn-primary" id="foro-publicar">Publicar</button>
+            </div>
+        `;
     }
-    
-    html += `
-        <div class="card">
-            <h4 style="margin-bottom: 1rem;">Nueva Publicación</h4>
-            <textarea rows="3" placeholder="Escribe aquí..." style="width: 100%; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 1rem;"></textarea>
-            <button class="btn btn-primary" onclick="publicarEnForo()">Publicar</button>
-        </div>
-    `;
-    
+
     container.innerHTML = html;
+    document.getElementById('foro-volver').addEventListener('click', loadForo);
+    const publicar = document.getElementById('foro-publicar');
+    if (publicar) publicar.addEventListener('click', publicarEnForo);
+    container.querySelectorAll('.foro-eliminar').forEach(boton => {
+        boton.addEventListener('click', () => eliminarMensaje(boton.dataset.mensajeId));
+    });
+    container.querySelectorAll('.foro-editar').forEach(boton => {
+        const mensaje = mensajes.find(m => String(m.id) === boton.dataset.mensajeId);
+        boton.addEventListener('click', () => editarMensaje(mensaje, boton.closest('.foro-vista')));
+    });
 }
 
-function publicarEnForo() {
-    const textarea = document.querySelector('#foro textarea');
-    if (textarea && textarea.value.trim()) {
-        alert('Publicación enviada: ' + textarea.value);
-        textarea.value = '';
-        loadForo();
-    } else {
-        alert('Escribe algo antes de publicar');
+// Cambia el mensaje por un editor en su lugar; Cancelar lo restaura sin recargar
+function editarMensaje(mensaje, vista) {
+    const editor = document.createElement('div');
+    editor.innerHTML = `
+        <textarea rows="3" maxlength="5000"
+                  style="width: 100%; padding: 0.75rem; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 0.5rem; font-family: inherit;"></textarea>
+        <p role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="button" class="btn btn-primary" data-accion="guardar">Guardar</button>
+            <button type="button" class="btn-salir" data-accion="cancelar">Cancelar</button>
+        </div>
+    `;
+    const textarea = editor.querySelector('textarea');
+    const error = editor.querySelector('[role="alert"]');
+    const guardar = editor.querySelector('[data-accion="guardar"]');
+    textarea.value = mensaje.contenido;  // .value, no innerHTML: el texto nunca se interpreta como HTML
+
+    const cerrar = () => {
+        editor.remove();
+        vista.style.display = '';
+    };
+
+    editor.querySelector('[data-accion="cancelar"]').addEventListener('click', cerrar);
+    guardar.addEventListener('click', async () => {
+        const contenido = textarea.value.trim();
+        if (!contenido) {
+            error.textContent = 'El mensaje no puede quedar vacío.';
+            return;
+        }
+        if (contenido === mensaje.contenido) {
+            cerrar();
+            return;
+        }
+
+        error.textContent = '';
+        guardar.disabled = true;
+        try {
+            const response = await api(`/mensajes-foro/${encodeURIComponent(mensaje.id)}/`, {
+                method: 'PATCH',
+                body: JSON.stringify({ contenido }),
+            });
+            if (response.ok) {
+                await abrirForo(foroActual);
+                return;
+            }
+            const datos = await response.json().catch(() => ({}));
+            error.textContent = datos.detail || 'No se pudo guardar el cambio.';
+        } catch {
+            error.textContent = 'No hay conexión con el servidor.';
+        }
+        guardar.disabled = false;
+    });
+
+    vista.style.display = 'none';
+    vista.after(editor);
+    textarea.focus();
+}
+
+async function publicarEnForo() {
+    const textarea = document.getElementById('foro-texto');
+    const error = document.getElementById('foro-error');
+    const boton = document.getElementById('foro-publicar');
+    const contenido = textarea.value.trim();
+
+    if (!contenido) {
+        error.textContent = 'Escribe algo antes de publicar.';
+        return;
     }
+
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api('/mensajes-foro/', {
+            method: 'POST',
+            body: JSON.stringify({ foro: foroActual.id, contenido }),
+        });
+        if (response.ok) {
+            await abrirForo(foroActual);
+            return;
+        }
+        const datos = await response.json().catch(() => ({}));
+        error.textContent = datos.detail || 'No se pudo publicar el mensaje.';
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function eliminarMensaje(mensajeId) {
+    if (!confirm('¿Eliminar este mensaje? No se puede deshacer.')) return;
+    try {
+        const response = await api(`/mensajes-foro/${encodeURIComponent(mensajeId)}/`, { method: 'DELETE' });
+        if (!response.ok) {
+            const datos = await response.json().catch(() => ({}));
+            alert(datos.detail || 'No se pudo eliminar el mensaje.');
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    await abrirForo(foroActual);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
@@ -302,6 +557,5 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 window.showSection = showSection;
-window.publicarEnForo = publicarEnForo;
 window.cargarClasesZoom = cargarClasesZoom;
 window.abrirClaseZoom = abrirClaseZoom;

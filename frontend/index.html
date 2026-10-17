@@ -31,6 +31,25 @@
             min-height: 100vh;
         }
 
+        /* Oculta la página hasta confirmar la sesión (ver js/auth.js) */
+        body.cargando {
+            visibility: hidden;
+        }
+
+        .btn-salir {
+            background: none;
+            border: 1px solid var(--gray-200);
+            border-radius: 8px;
+            padding: 0.4rem 0.8rem;
+            color: var(--gray-700);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .btn-salir:hover {
+            background: var(--gray-100);
+        }
+
         /* Header */
         .header {
             background: white;
@@ -354,6 +373,11 @@
             color: white;
         }
 
+        .badge-neutral {
+            background: var(--gray-200);
+            color: var(--gray-700);
+        }
+
         /* Button */
         .btn {
             padding: 0.75rem 1.5rem;
@@ -404,7 +428,7 @@
         }
     </style>
 </head>
-<body>
+<body class="cargando">
     <!-- Header -->
     <div class="header">
         <div class="header-left">
@@ -414,12 +438,13 @@
         </div>
         <div class="header-right">
             <div class="user-profile">
-                <div class="user-avatar">KR</div>
+                <div class="user-avatar" id="header-avatar"></div>
                 <div>
-                    <div style="font-weight: 600; font-size: 0.9rem;">Katherine Ruth</div>
-                    <div style="font-size: 0.75rem; color: var(--gray-700);">Estudiante</div>
+                    <div id="header-nombre" style="font-weight: 600; font-size: 0.9rem;"></div>
+                    <div id="header-rol" style="font-size: 0.75rem; color: var(--gray-700);"></div>
                 </div>
             </div>
+            <button type="button" class="btn-salir" onclick="cerrarSesion()">Cerrar sesión</button>
         </div>
     </div>
 
@@ -433,16 +458,16 @@
                     </div>
                     <div class="student-name">Katherine Ruth Herrera Galloso</div>
                     <div class="student-id">Matrícula: 24018097</div>
-                    <div class="student-program">Bachillerato General</div>
+                    <div class="student-program">—</div>
                     <div class="progress-circle">
                         <svg width="100" height="100">
                             <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.3)" stroke-width="8"/>
-                            <circle cx="50" cy="50" r="40" fill="none" stroke="white" stroke-width="8" 
-                                    stroke-dasharray="251" stroke-dashoffset="161" transform="rotate(-90 50 50)"/>
+                            <circle id="progress-arc" cx="50" cy="50" r="40" fill="none" stroke="white" stroke-width="8"
+                                    stroke-dasharray="251" stroke-dashoffset="251" transform="rotate(-90 50 50)"/>
                         </svg>
-                        <div class="progress-text">36%</div>
+                        <div class="progress-text">—</div>
                     </div>
-                    <div style="font-size: 0.85rem;">9 de 25 Materias</div>
+                    <div id="progress-materias" style="font-size: 0.85rem;"></div>
                 </div>
             </div>
 
@@ -459,11 +484,11 @@
                     <span class="menu-icon">📋</span>
                     <span>Control Escolar</span>
                 </a>
-                <a href="#" class="menu-item" onclick="showSection('tutor'); return false;">
+                <a href="#" class="menu-item" data-roles="estudiante" onclick="showSection('tutor'); return false;">
                     <span class="menu-icon">👨‍🏫</span>
                     <span>Mi Tutor</span>
                 </a>
-                <a href="#" class="menu-item" onclick="showSection('ayuda'); return false;">
+                <a href="#" class="menu-item" data-roles="estudiante,staff" onclick="showSection('ayuda'); return false;">
                     <span class="menu-icon">🆘</span>
                     <span>Mesa de Ayuda</span>
                 </a>
@@ -555,22 +580,22 @@
                     </div>
                 </div>
 
-                <h3 style="margin-bottom: 1rem; color: white;">Tus Estadísticas</h3>
-                <div class="stats-grid">
+                <h3 data-roles="estudiante" style="margin-bottom: 1rem; color: white;">Tus Estadísticas</h3>
+                <div class="stats-grid" data-roles="estudiante">
                     <div class="stat-card">
-                        <div class="stat-value">9</div>
+                        <div class="stat-value" id="stat-cursadas">—</div>
                         <div class="stat-label">Materias Cursadas</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">25</div>
+                        <div class="stat-value" id="stat-totales">—</div>
                         <div class="stat-label">Materias Totales</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">36%</div>
+                        <div class="stat-value" id="stat-progreso">—</div>
                         <div class="stat-label">Progreso Académico</div>
                     </div>
                     <div class="stat-card">
-                        <div class="stat-value">8.5</div>
+                        <div class="stat-value" id="stat-promedio">—</div>
                         <div class="stat-label">Promedio General</div>
                     </div>
                 </div>
@@ -980,48 +1005,7 @@
         </div>
     </div>
 
-    <script>
-        function showSection(sectionId) {
-            // Ocultar todas las secciones
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.remove('active');
-            });
-            
-            // Mostrar la sección seleccionada
-            const selectedSection = document.getElementById(sectionId);
-            if (selectedSection) {
-                selectedSection.classList.add('active');
-            }
-            
-            // Actualizar menú activo
-            document.querySelectorAll('.menu-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            
-            // Buscar y activar el item del menú correspondiente
-            const menuItems = document.querySelectorAll('.menu-item');
-            menuItems.forEach(item => {
-                if (item.getAttribute('onclick') && item.getAttribute('onclick').includes(sectionId)) {
-                    item.classList.add('active');
-                }
-            });
-        }
-
-        // Cargar datos del API
-        async function loadStudentData() {
-            try {
-                const response = await fetch('/api/estudiantes/');
-                const data = await response.json();
-                console.log('Datos de estudiantes:', data);
-            } catch (error) {
-                console.error('Error cargando datos:', error);
-            }
-        }
-
-        // Cargar al iniciar
-        window.addEventListener('DOMContentLoaded', () => {
-            loadStudentData();
-        });
-    </script>
+    <script src="js/auth.js"></script>
+    <script src="js/app.js"></script>
 </body>
 </html>

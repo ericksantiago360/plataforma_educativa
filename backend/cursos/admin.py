@@ -3,6 +3,6 @@ from .models import Curso
 
 @admin.register(Curso)
 class CursoAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'codigo', 'profesor', 'creditos', 'activo')
+    list_display = ('nombre', 'codigo', 'profesor', 'titular', 'creditos', 'activo')
     search_fields = ('nombre', 'codigo', 'profesor')
     list_filter = ('activo', 'fecha_inicio')

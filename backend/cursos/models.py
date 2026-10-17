@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db import models
 from estudiantes.models import Estudiante
 
@@ -5,7 +6,15 @@ class Curso(models.Model):
     nombre = models.CharField(max_length=150)
     codigo = models.CharField(max_length=50, unique=True)
     descripcion = models.TextField()
-    profesor = models.CharField(max_length=100)
+    profesor = models.CharField(max_length=100)  # Texto heredado; se eliminará cuando todos los cursos tengan titular
+    titular = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='cursos_impartidos',
+        limit_choices_to={'groups__name': 'Profesor'},
+    )
     creditos = models.IntegerField(default=3)
     estudiantes = models.ManyToManyField(Estudiante, related_name='cursos', blank=True)
     fecha_inicio = models.DateField()
