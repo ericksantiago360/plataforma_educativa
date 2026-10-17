@@ -48,14 +48,55 @@ async function init() {
     usuarioActual = usuario;
     currentStudent = usuario.estudiante;
 
-    const [, , perfil] = await Promise.all([loadCourses(), loadTasks(), loadPerfil()]);
+    const [, , perfil, eventos] = await Promise.all([loadCourses(), loadTasks(), loadPerfil(), loadProximosEventos()]);
     updatePerfil(perfil);
+    updateBanner(perfil, eventos);
     updateDashboard(usuario);
+}
+
+async function loadProximosEventos() {
+    try {
+        return await getLista('/calendario/?proximos=1');
+    } catch (error) {
+        console.error('Error cargando próximos eventos:', error);
+        return [];
+    }
+}
+
+// Banner del inicio. Prioridad: periodo y fecha límite del perfil; si el perfil no tiene
+// fecha límite, la próxima entrega del calendario; sin perfil (profesor/staff), el próximo evento.
+function updateBanner(perfil, eventos) {
+    const banner = document.getElementById('period-info');
+    if (!banner) return;
+
+    const partes = [];
+    if (perfil && perfil.periodo_actual) {
+        partes.push(['Período', perfil.periodo_actual]);
+    }
+
+    if (perfil && perfil.fecha_limite_actividades) {
+        partes.push(['Fecha Límite de Entrega', formatearDia(perfil.fecha_limite_actividades)]);
+    } else {
+        // El calendario ya viene ordenado por fecha de inicio
+        const entrega = eventos.find(e => e.tipo_evento === 'entrega');
+        const evento = entrega || (perfil ? null : eventos[0]);
+        if (evento) {
+            const fecha = new Date(evento.fecha_inicio).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+            partes.push([entrega ? 'Próxima entrega' : 'Próximo evento', `${evento.titulo} · ${fecha}`]);
+        }
+    }
+
+    if (partes.length === 0) {
+        banner.style.display = 'none';
+        return;
+    }
+    banner.innerHTML = partes.map(([etiqueta, valor]) => `<strong>${escapeHtml(etiqueta)}:</strong> ${escapeHtml(valor)}`).join(' | ');
+    banner.style.display = '';
 }
 
 async function loadCourses() {
     try {
-        courses = await getLista('/cursos/');
+        courses = await getTodas('/cursos/');
     } catch (error) {
         console.error('Error cargando cursos:', error);
     }
@@ -63,7 +104,7 @@ async function loadCourses() {
 
 async function loadTasks() {
     try {
-        tasks = await getLista('/tareas/');
+        tasks = await getTodas('/tareas/');
     } catch (error) {
         console.error('Error cargando tareas:', error);
     }
@@ -171,6 +212,12 @@ function showSection(sectionId) {
         case 'idiomas':
             loadIdiomas();
             break;
+        case 'tareas':
+            loadTareas();
+            break;
+        case 'administracion':
+            loadAdministracion();
+            break;
     }
 }
 
@@ -223,11 +270,60 @@ async function loadControlEscolar() {
                 </div>
                 ${alumno}
                 <div>Período: ${escapeHtml(registro.periodo)}</div>
+                ${currentStudent ? '' : editorDeCalificacion(registro)}
             </div>
         `;
     });
 
     container.innerHTML = html;
+    container.querySelectorAll('.calificacion-guardar').forEach(boton => {
+        boton.addEventListener('click', () => guardarCalificacion(boton.dataset.registroId, boton.closest('.calificacion-editor')));
+    });
+}
+
+// Captura de calificación en línea para profesor y staff (la API limita al profesor a sus materias)
+function editorDeCalificacion(registro) {
+    const opciones = Object.entries(ESTADOS_ESCOLARES).map(([valor, { texto }]) =>
+        `<option value="${valor}"${valor === registro.estado ? ' selected' : ''}>${texto}</option>`
+    ).join('');
+    const valor = registro.calificacion !== null ? Number(registro.calificacion) : '';
+    return `
+        <div class="calificacion-editor" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;">
+            <input type="number" class="calificacion-valor" min="0" max="10" step="0.1" value="${escapeHtml(valor)}"
+                   placeholder="0 – 10" aria-label="Calificación" style="${ESTILO_CAMPO} width: 6.5rem;">
+            <select class="calificacion-estado" aria-label="Estado" style="${ESTILO_CAMPO} width: auto;">${opciones}</select>
+            <button type="button" class="btn btn-primary calificacion-guardar" data-registro-id="${escapeHtml(registro.id)}">Guardar</button>
+            <span class="calificacion-mensaje" role="status" style="font-size: 0.85rem;"></span>
+        </div>
+    `;
+}
+
+async function guardarCalificacion(registroId, editor) {
+    const mensaje = editor.querySelector('.calificacion-mensaje');
+    const boton = editor.querySelector('.calificacion-guardar');
+    const valor = editor.querySelector('.calificacion-valor').value.trim();
+
+    mensaje.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api(`/control-escolar/${encodeURIComponent(registroId)}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({
+                calificacion: valor === '' ? null : valor,
+                estado: editor.querySelector('.calificacion-estado').value,
+            }),
+        });
+        if (response.ok) {
+            await loadControlEscolar();
+            return;
+        }
+        mensaje.style.color = 'var(--danger)';
+        mensaje.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo guardar.');
+    } catch {
+        mensaje.style.color = 'var(--danger)';
+        mensaje.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
 }
 
 // Función auxiliar para abrir Zoom
@@ -1040,6 +1136,541 @@ async function cambiarInscripcion(boton) {
         error.textContent = 'No hay conexión con el servidor.';
     }
     boton.disabled = false;
+}
+
+// ---------- Tareas ----------
+
+const BADGES_TAREA = {
+    pendiente: 'badge-scheduled',
+    en_progreso: 'badge-scheduled',
+    completada: 'badge-completed',
+};
+
+function puedeGestionarTareas() {
+    return Boolean(usuarioActual) && ['profesor', 'staff'].includes(usuarioActual.rol);
+}
+
+// Valor por defecto del campo de fecha: mañana a las 23:59, en hora local
+function mananaAlFinalDelDia() {
+    const fecha = new Date();
+    fecha.setDate(fecha.getDate() + 1);
+    fecha.setHours(23, 59, 0, 0);
+    const dos = n => String(n).padStart(2, '0');
+    return `${fecha.getFullYear()}-${dos(fecha.getMonth() + 1)}-${dos(fecha.getDate())}T23:59`;
+}
+
+async function loadTareas() {
+    const container = document.getElementById('tareas-contenido');
+    if (!container) return;
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    let lista;
+    try {
+        lista = await getTodas('/tareas/');
+    } catch (error) {
+        console.error('Error cargando tareas:', error);
+        errorDeCarga(container, 'las tareas');
+        return;
+    }
+
+    let html = '';
+    if (puedeGestionarTareas()) {
+        const opcionesCurso = courses.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nombre)} (${escapeHtml(c.codigo)})</option>`).join('');
+        html += courses.length === 0
+            ? '<div class="card" style="margin-bottom: 1.5rem;"><p>No tienes cursos asignados para crear tareas.</p></div>'
+            : `
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <h3>Nueva tarea</h3>
+                <form id="tarea-form" style="margin-top: 1rem;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                        <div>
+                            <label for="tarea-curso" style="display: block; margin-bottom: 0.5rem;">Curso</label>
+                            <select id="tarea-curso" style="${ESTILO_CAMPO}">${opcionesCurso}</select>
+                        </div>
+                        <div>
+                            <label for="tarea-vence" style="display: block; margin-bottom: 0.5rem;">Fecha de entrega</label>
+                            <input id="tarea-vence" type="datetime-local" required value="${mananaAlFinalDelDia()}" style="${ESTILO_CAMPO}">
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="tarea-titulo" style="display: block; margin-bottom: 0.5rem;">Título</label>
+                        <input id="tarea-titulo" type="text" maxlength="200" required style="${ESTILO_CAMPO}">
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="tarea-descripcion" style="display: block; margin-bottom: 0.5rem;">Instrucciones</label>
+                        <textarea id="tarea-descripcion" rows="3" required style="${ESTILO_CAMPO}"></textarea>
+                    </div>
+                    <p id="tarea-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+                    <button class="btn btn-primary" type="submit" id="tarea-crear">Crear tarea</button>
+                </form>
+            </div>
+        `;
+    }
+
+    html += `<div class="clases-list"><h3 style="margin-bottom: 1rem;">${puedeGestionarTareas() ? 'Tareas de mis cursos' : 'Mis tareas'}</h3>`;
+    if (lista.length === 0) {
+        html += '<p>No hay tareas.</p>';
+    }
+
+    const ahora = new Date();
+    lista.forEach(tarea => {
+        const vence = new Date(tarea.fecha_vencimiento);
+        const vencida = vence < ahora && tarea.estado !== 'completada';
+        html += `
+            <div class="clase-item">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(tarea.titulo)}</div>
+                    <div class="clase-badge ${vencida ? 'badge-live' : (BADGES_TAREA[tarea.estado] || 'badge-neutral')}">
+                        ${vencida ? 'Vencida' : escapeHtml(tarea.estado_nombre)}
+                    </div>
+                </div>
+                <div style="color: var(--gray-700); font-size: 0.85rem;">
+                    ${escapeHtml(tarea.curso_nombre)} · Entrega: ${escapeHtml(vence.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }))}
+                </div>
+                <p style="margin-top: 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(tarea.descripcion)}</p>
+                ${puedeGestionarTareas() ? `
+                    <button type="button" class="tarea-eliminar" data-tarea-id="${escapeHtml(tarea.id)}"
+                            style="${ESTILO_ACCION} color: var(--danger); margin-top: 0.75rem;">Eliminar</button>` : ''}
+            </div>
+        `;
+    });
+    html += '</div>';
+
+    container.innerHTML = html;
+    const form = document.getElementById('tarea-form');
+    if (form) form.addEventListener('submit', crearTarea);
+    container.querySelectorAll('.tarea-eliminar').forEach(boton => {
+        boton.addEventListener('click', () => eliminarTarea(boton.dataset.tareaId));
+    });
+}
+
+async function crearTarea(evento) {
+    evento.preventDefault();
+    const error = document.getElementById('tarea-error');
+    const boton = document.getElementById('tarea-crear');
+    const datos = {
+        curso: document.getElementById('tarea-curso').value,
+        titulo: document.getElementById('tarea-titulo').value.trim(),
+        descripcion: document.getElementById('tarea-descripcion').value.trim(),
+        // datetime-local viene en hora local; se envía en ISO (UTC) para que el servidor no la reinterprete
+        fecha_vencimiento: new Date(document.getElementById('tarea-vence').value).toISOString(),
+    };
+
+    if (!datos.titulo || !datos.descripcion) {
+        error.textContent = 'Escribe el título y las instrucciones.';
+        return;
+    }
+
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api('/tareas/', { method: 'POST', body: JSON.stringify(datos) });
+        if (response.ok) {
+            await loadTareas();
+            return;
+        }
+        error.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo crear la tarea.');
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function eliminarTarea(tareaId) {
+    if (!confirm('¿Eliminar esta tarea? No se puede deshacer.')) return;
+    try {
+        const response = await api(`/tareas/${encodeURIComponent(tareaId)}/`, { method: 'DELETE' });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo eliminar la tarea.'));
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    await loadTareas();
+}
+
+// ---------- Administración (solo staff) ----------
+
+const NIVELES_EDUCATIVOS = [
+    ['preparatoria', 'Preparatoria'],
+    ['tsu', 'Técnico Superior Universitario'],
+    ['licenciatura', 'Carrera Profesional'],
+    ['maestria', 'Maestría'],
+    ['doctorado', 'Doctorado'],
+];
+
+function campoAlta(id, etiqueta, atributos = '') {
+    return `
+        <div>
+            <label for="alta-${id}" style="display: block; margin-bottom: 0.5rem;">${etiqueta}</label>
+            <input id="alta-${id}" name="${id}" ${atributos} style="${ESTILO_CAMPO}">
+        </div>
+    `;
+}
+
+async function loadAdministracion() {
+    const container = document.getElementById('administracion-contenido');
+    if (!container) return;
+
+    const opcionesNivel = NIVELES_EDUCATIVOS.map(([valor, nombre]) =>
+        `<option value="${valor}"${valor === 'licenciatura' ? ' selected' : ''}>${nombre}</option>`).join('');
+    const opcionesCurso = courses.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nombre)} (${escapeHtml(c.codigo)})</option>`).join('');
+
+    container.innerHTML = `
+        <div class="card" style="margin-bottom: 1.5rem;">
+            <h3>Alta de estudiante</h3>
+            <p style="color: var(--gray-700); font-size: 0.9rem; margin-top: 0.25rem;">
+                Crea el expediente, la cuenta de acceso (usuario = matrícula) y el perfil académico.
+            </p>
+            <form id="alta-form" style="margin-top: 1rem;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                    ${campoAlta('nombre', 'Nombre', 'required maxlength="100"')}
+                    ${campoAlta('apellido', 'Apellido', 'required maxlength="100"')}
+                    ${campoAlta('matricula', 'Matrícula', 'required maxlength="50"')}
+                    ${campoAlta('email', 'Correo', 'type="email" required')}
+                    ${campoAlta('telefono', 'Teléfono (opcional)', 'type="tel" maxlength="20"')}
+                    <div>
+                        <label for="alta-nivel_educativo" style="display: block; margin-bottom: 0.5rem;">Nivel</label>
+                        <select id="alta-nivel_educativo" name="nivel_educativo" style="${ESTILO_CAMPO}">${opcionesNivel}</select>
+                    </div>
+                    ${campoAlta('programa', 'Programa', 'required maxlength="200" placeholder="Licenciatura en …"')}
+                    ${campoAlta('periodo_actual', 'Periodo', 'required maxlength="50" placeholder="2026-2"')}
+                    ${campoAlta('materias_totales', 'Materias del plan', 'type="number" min="0" value="40"')}
+                </div>
+                <p id="alta-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+                <button class="btn btn-primary" type="submit" id="alta-enviar">Dar de alta</button>
+            </form>
+            <div id="alta-resultado"></div>
+        </div>
+
+        <div class="card">
+            <h3>Inscripción a cursos</h3>
+            ${courses.length === 0 ? '<p style="margin-top: 1rem;">No hay cursos registrados.</p>' : `
+                <div style="margin-top: 1rem;">
+                    <label for="inscripcion-curso" style="display: block; margin-bottom: 0.5rem;">Curso</label>
+                    <select id="inscripcion-curso" style="${ESTILO_CAMPO}">${opcionesCurso}</select>
+                </div>
+                <div id="inscripcion-detalle" style="margin-top: 1rem;"></div>
+            `}
+        </div>
+
+        ${tarjetaMaterias(opcionesCurso)}
+    `;
+
+    document.getElementById('alta-form').addEventListener('submit', darDeAlta);
+    const selectCurso = document.getElementById('inscripcion-curso');
+    if (selectCurso) {
+        selectCurso.addEventListener('change', cargarInscripcion);
+        await cargarInscripcion();
+    }
+    const selectMaterias = document.getElementById('materias-curso');
+    if (selectMaterias) {
+        selectMaterias.addEventListener('change', renderMaterias);
+        document.getElementById('materia-form').addEventListener('submit', crearMateria);
+        await cargarMaterias();
+    }
+}
+
+// ---------- Materias (dentro de Administración) ----------
+
+let materiasAdmin = [];
+
+// Periodo en curso con el formato AAAA-N: enero-junio = 1, julio-diciembre = 2
+function periodoActual() {
+    const hoy = new Date();
+    return `${hoy.getFullYear()}-${hoy.getMonth() < 6 ? 1 : 2}`;
+}
+
+function tarjetaMaterias(opcionesCurso) {
+    if (courses.length === 0) return '';
+    const etiqueta = 'display: block; margin-bottom: 0.5rem;';
+    return `
+        <div class="card" style="margin-top: 1.5rem;">
+            <h3>Materias</h3>
+            <p style="color: var(--gray-700); font-size: 0.9rem; margin-top: 0.25rem;">
+                Crea las materias de cada curso e inscribe al grupo en un periodo; así aparecen en Control Escolar para calificarlas.
+            </p>
+            <div style="margin-top: 1rem;">
+                <label for="materias-curso" style="${etiqueta}">Curso</label>
+                <select id="materias-curso" style="${ESTILO_CAMPO}">${opcionesCurso}</select>
+            </div>
+
+            <form id="materia-form" style="margin-top: 1rem; padding: 1rem; background: var(--gray-100); border-radius: 8px;">
+                <h4 style="margin-bottom: 0.75rem;">Nueva materia</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+                    <div style="grid-column: span 2;">
+                        <label for="materia-nombre" style="${etiqueta}">Nombre</label>
+                        <input id="materia-nombre" required maxlength="200" style="${ESTILO_CAMPO} background: white;">
+                    </div>
+                    <div>
+                        <label for="materia-codigo" style="${etiqueta}">Código</label>
+                        <input id="materia-codigo" required maxlength="50" placeholder="ADM101-3" style="${ESTILO_CAMPO} background: white;">
+                    </div>
+                    <div>
+                        <label for="materia-creditos" style="${etiqueta}">Créditos</label>
+                        <input id="materia-creditos" type="number" min="0" required value="6" style="${ESTILO_CAMPO} background: white;">
+                    </div>
+                    <div>
+                        <label for="materia-nivel" style="${etiqueta}">Nivel (semestre)</label>
+                        <input id="materia-nivel" type="number" min="1" required value="1" style="${ESTILO_CAMPO} background: white;">
+                    </div>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="materia-descripcion" style="${etiqueta}">Descripción</label>
+                    <textarea id="materia-descripcion" rows="2" required style="${ESTILO_CAMPO} background: white;"></textarea>
+                </div>
+                <p id="materia-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem;"></p>
+                <button class="btn btn-primary" type="submit" id="materia-crear">Crear materia</button>
+            </form>
+
+            <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 1.5rem;">
+                <label for="materias-periodo">Periodo para inscribir al grupo:</label>
+                <input id="materias-periodo" value="${periodoActual()}" placeholder="AAAA-N" maxlength="7"
+                       style="${ESTILO_CAMPO} width: 7rem;">
+            </div>
+            <div id="materias-lista" style="margin-top: 1rem;"><p>Cargando…</p></div>
+        </div>
+    `;
+}
+
+async function cargarMaterias() {
+    try {
+        materiasAdmin = await getTodas('/materias/');
+    } catch (error) {
+        console.error('Error cargando materias:', error);
+        document.getElementById('materias-lista').innerHTML = '<p style="color: red;">No se pudieron cargar las materias.</p>';
+        return;
+    }
+    renderMaterias();
+}
+
+function renderMaterias() {
+    const lista = document.getElementById('materias-lista');
+    const cursoId = document.getElementById('materias-curso').value;
+    const delCurso = materiasAdmin.filter(m => String(m.curso) === cursoId);
+
+    if (delCurso.length === 0) {
+        lista.innerHTML = '<p>Este curso aún no tiene materias.</p>';
+        return;
+    }
+
+    lista.innerHTML = delCurso.map(materia => `
+        <div class="clase-item" data-materia-id="${escapeHtml(materia.id)}">
+            <div class="clase-header">
+                <div class="clase-title">${escapeHtml(materia.codigo)} · ${escapeHtml(materia.nombre)}</div>
+                <div class="clase-badge ${materia.activo ? 'badge-completed' : 'badge-neutral'}">${materia.activo ? 'Activa' : 'Inactiva'}</div>
+            </div>
+            <div style="color: var(--gray-700); font-size: 0.85rem;">Nivel ${escapeHtml(materia.nivel)} · ${escapeHtml(materia.creditos)} créditos</div>
+            <p style="margin-top: 0.25rem;">${escapeHtml(materia.descripcion)}</p>
+            <div style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-top: 0.75rem;">
+                ${materia.activo ? `<button type="button" class="btn btn-primary materia-inscribir">Inscribir al grupo</button>` : ''}
+                <button type="button" class="materia-activo" style="${ESTILO_ACCION} color: ${materia.activo ? 'var(--danger)' : 'var(--primary)'};">
+                    ${materia.activo ? 'Desactivar' : 'Activar'}
+                </button>
+                <span class="materia-mensaje" role="status" style="font-size: 0.85rem;"></span>
+            </div>
+        </div>
+    `).join('');
+
+    lista.querySelectorAll('.clase-item').forEach(item => {
+        const materia = delCurso.find(m => String(m.id) === item.dataset.materiaId);
+        const inscribir = item.querySelector('.materia-inscribir');
+        if (inscribir) inscribir.addEventListener('click', () => inscribirGrupo(materia, item));
+        item.querySelector('.materia-activo').addEventListener('click', () => cambiarActivoMateria(materia));
+    });
+}
+
+async function crearMateria(evento) {
+    evento.preventDefault();
+    const error = document.getElementById('materia-error');
+    const boton = document.getElementById('materia-crear');
+    const valor = id => document.getElementById(id).value.trim();
+    const datos = {
+        curso: document.getElementById('materias-curso').value,
+        nombre: valor('materia-nombre'),
+        codigo: valor('materia-codigo'),
+        creditos: Number(valor('materia-creditos')),
+        nivel: Number(valor('materia-nivel')),
+        descripcion: valor('materia-descripcion'),
+    };
+
+    if (!datos.nombre || !datos.codigo || !datos.descripcion) {
+        error.textContent = 'Completa el nombre, el código y la descripción.';
+        return;
+    }
+
+    error.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api('/materias/', { method: 'POST', body: JSON.stringify(datos) });
+        if (response.ok) {
+            ['materia-nombre', 'materia-codigo', 'materia-descripcion'].forEach(id => { document.getElementById(id).value = ''; });
+            await cargarMaterias();
+        } else {
+            error.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo crear la materia.');
+        }
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function cambiarActivoMateria(materia) {
+    const desactivar = materia.activo;
+    if (desactivar && !confirm(`¿Desactivar ${materia.codigo}? Ya no se podrá inscribir a grupos en ella.`)) return;
+    try {
+        const response = await api(`/materias/${encodeURIComponent(materia.id)}/`, {
+            method: 'PATCH',
+            body: JSON.stringify({ activo: !desactivar }),
+        });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo actualizar la materia.'));
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    await cargarMaterias();
+}
+
+async function inscribirGrupo(materia, item) {
+    const mensaje = item.querySelector('.materia-mensaje');
+    const boton = item.querySelector('.materia-inscribir');
+    const periodo = document.getElementById('materias-periodo').value.trim();
+
+    mensaje.style.color = 'var(--danger)';
+    mensaje.textContent = '';
+    boton.disabled = true;
+    try {
+        const response = await api(`/materias/${encodeURIComponent(materia.id)}/inscribir_grupo/`, {
+            method: 'POST',
+            body: JSON.stringify({ periodo }),
+        });
+        const datos = await response.json().catch(() => ({}));
+        if (response.ok) {
+            mensaje.style.color = 'var(--success)';
+            const inscritos = datos.inscritos === 1 ? '1 alumno inscrito' : `${datos.inscritos} alumnos inscritos`;
+            const previos = datos.ya_inscritos === 1 ? '1 ya lo estaba' : `${datos.ya_inscritos} ya lo estaban`;
+            mensaje.textContent = datos.inscritos === 0
+                ? `Todo el grupo ya estaba inscrito en ${periodo}.`
+                : `✅ ${inscritos} en ${periodo}` + (datos.ya_inscritos ? ` (${previos}).` : '.');
+        } else {
+            mensaje.textContent = mensajeDeError(datos, 'No se pudo inscribir al grupo.');
+        }
+    } catch {
+        mensaje.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function darDeAlta(evento) {
+    evento.preventDefault();
+    const form = evento.target;
+    const error = document.getElementById('alta-error');
+    const resultado = document.getElementById('alta-resultado');
+    const boton = document.getElementById('alta-enviar');
+
+    const datos = Object.fromEntries(new FormData(form).entries());
+    Object.keys(datos).forEach(campo => { datos[campo] = datos[campo].trim(); });
+    datos.materias_totales = Number(datos.materias_totales || 0);
+
+    error.textContent = '';
+    resultado.innerHTML = '';
+    boton.disabled = true;
+    try {
+        const response = await api('/estudiantes/alta/', { method: 'POST', body: JSON.stringify(datos) });
+        const respuesta = await response.json().catch(() => ({}));
+        if (response.ok) {
+            form.reset();
+            // La contraseña temporal solo existe en esta respuesta: se muestra una vez
+            resultado.innerHTML = `
+                <div style="margin-top: 1rem; padding: 1rem; background: #dcfce7; border-radius: 8px;">
+                    <strong>✅ ${escapeHtml(respuesta.estudiante.nombre)} ${escapeHtml(respuesta.estudiante.apellido)} quedó registrado.</strong>
+                    <p style="margin-top: 0.5rem;">Usuario: <code>${escapeHtml(respuesta.usuario)}</code></p>
+                    <p>Contraseña temporal: <code>${escapeHtml(respuesta.password_temporal)}</code></p>
+                    <p style="margin-top: 0.5rem; font-size: 0.85rem;">Anótala y entrégala al estudiante: no se volverá a mostrar.</p>
+                </div>
+            `;
+            await cargarInscripcion();  // el nuevo estudiante ya aparece para inscribirlo
+        } else {
+            error.textContent = mensajeDeError(respuesta, 'No se pudo dar de alta.');
+        }
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+    }
+    boton.disabled = false;
+}
+
+async function cargarInscripcion() {
+    const selectCurso = document.getElementById('inscripcion-curso');
+    const detalle = document.getElementById('inscripcion-detalle');
+    if (!selectCurso || !detalle) return;
+    const cursoId = selectCurso.value;
+    detalle.innerHTML = '<p>Cargando…</p>';
+
+    let inscritos, estudiantes;
+    try {
+        [inscritos, estudiantes] = await Promise.all([
+            getTodas(`/cursos/${encodeURIComponent(cursoId)}/inscritos/`),
+            getTodas('/estudiantes/'),
+        ]);
+    } catch (error) {
+        console.error('Error cargando inscripciones:', error);
+        detalle.innerHTML = '<p style="color: red;">No se pudo cargar la inscripción.</p>';
+        return;
+    }
+
+    const idsInscritos = new Set(inscritos.map(e => e.id));
+    const disponibles = estudiantes.filter(e => !idsInscritos.has(e.id) && e.activo);
+
+    detalle.innerHTML = `
+        <h4 style="margin-bottom: 0.5rem;">Inscritos (${inscritos.length})</h4>
+        ${inscritos.length === 0 ? '<p>Nadie inscrito todavía.</p>' : inscritos.map(e => `
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid var(--gray-200);">
+                <span>${escapeHtml(e.nombre)} ${escapeHtml(e.apellido)} <span style="color: var(--gray-700); font-size: 0.85rem;">· ${escapeHtml(e.matricula)}</span></span>
+                <button type="button" class="inscripcion-quitar" data-estudiante-id="${escapeHtml(e.id)}"
+                        style="${ESTILO_ACCION} color: var(--danger);">Quitar</button>
+            </div>`).join('')}
+        ${disponibles.length === 0 ? '<p style="margin-top: 1rem; color: var(--gray-700);">Todos los estudiantes activos ya están inscritos.</p>' : `
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem;">
+                <select id="inscripcion-estudiante" aria-label="Estudiante a inscribir" style="${ESTILO_CAMPO} flex: 1; width: auto; min-width: 200px;">
+                    ${disponibles.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.apellido)}, ${escapeHtml(e.nombre)} · ${escapeHtml(e.matricula)}</option>`).join('')}
+                </select>
+                <button type="button" class="btn btn-primary" id="inscripcion-agregar">Inscribir</button>
+            </div>`}
+        <p id="inscripcion-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem;"></p>
+    `;
+
+    const agregar = document.getElementById('inscripcion-agregar');
+    if (agregar) {
+        agregar.addEventListener('click', () =>
+            cambiarInscripcionCurso(cursoId, 'inscribir', document.getElementById('inscripcion-estudiante').value));
+    }
+    detalle.querySelectorAll('.inscripcion-quitar').forEach(boton => {
+        boton.addEventListener('click', () => cambiarInscripcionCurso(cursoId, 'quitar', boton.dataset.estudianteId));
+    });
+}
+
+async function cambiarInscripcionCurso(cursoId, accion, estudianteId) {
+    if (accion === 'quitar' && !confirm('¿Quitar a este estudiante del curso?')) return;
+    const error = document.getElementById('inscripcion-error');
+    try {
+        const response = await api(`/cursos/${encodeURIComponent(cursoId)}/${accion}/`, {
+            method: 'POST',
+            body: JSON.stringify({ estudiante: estudianteId }),
+        });
+        if (!response.ok) {
+            error.textContent = mensajeDeError(await response.json().catch(() => ({})), 'No se pudo completar la operación.');
+            return;
+        }
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+        return;
+    }
+    await cargarInscripcion();
 }
 
 window.addEventListener('DOMContentLoaded', () => {

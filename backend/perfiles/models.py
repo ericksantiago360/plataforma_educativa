@@ -28,6 +28,16 @@ class PerfilEstudiante(models.Model):
     def __str__(self):
         return f"Perfil de {self.estudiante.nombre} {self.estudiante.apellido}"
 
+    def recalcular(self):
+        """Actualiza materias aprobadas, progreso y promedio a partir del historial (ControlEscolar)."""
+        registros = self.estudiante.historial_escolar.all()
+        self.materias_cursadas = registros.filter(estado='aprobado').count()
+        promedio = registros.filter(calificacion__isnull=False).aggregate(p=models.Avg('calificacion'))['p']
+        self.promedio = round(promedio or 0, 2)
+        if self.materias_totales:
+            self.progreso_academico = min(100, round(self.materias_cursadas * 100 / self.materias_totales))
+        self.save(update_fields=['materias_cursadas', 'promedio', 'progreso_academico'])
+
 class Tutor(models.Model):
     nombre = models.CharField(max_length=200)
     email = models.EmailField()

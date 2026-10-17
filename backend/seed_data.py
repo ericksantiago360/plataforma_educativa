@@ -6,7 +6,6 @@ from coordinacion.models import Tarea, Comunicado
 from academico.models import Materia, ControlEscolar, ClaseEnLinea, ForoClase, MensajeForo
 from perfiles.models import PerfilEstudiante, Tutor, AsignacionTutor
 from servicios.models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
-from django.db.models import Avg
 from django.utils import timezone
 from datetime import datetime, timedelta
 
@@ -173,19 +172,14 @@ programas = {
     est3: 'Licenciatura en Contaduría',
 }
 for estudiante, programa in programas.items():
-    registros = ControlEscolar.objects.filter(estudiante=estudiante)
-    aprobadas = registros.filter(estado='aprobado').count()
-    promedio = registros.filter(calificacion__isnull=False).aggregate(p=Avg('calificacion'))['p'] or 0
     PerfilEstudiante.objects.create(
         estudiante=estudiante,
         nivel_educativo='licenciatura',
         programa=programa,
         periodo_actual='2026-2',
-        materias_cursadas=aprobadas,
+        fecha_limite_actividades=timezone.localdate(ahora + timedelta(days=20)),  # mismo día que el cierre del periodo
         materias_totales=MATERIAS_DEL_PLAN,
-        progreso_academico=round(aprobadas * 100 / MATERIAS_DEL_PLAN),
-        promedio=round(promedio, 2),
-    )
+    ).recalcular()
 
 # Tutores
 tutor_lucia = Tutor.objects.create(nombre='Lucía Hernández Mora', email='lucia.hernandez@universidad.edu',

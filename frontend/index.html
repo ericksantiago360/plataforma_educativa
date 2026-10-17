@@ -484,6 +484,10 @@
                     <span class="menu-icon">📋</span>
                     <span>Control Escolar</span>
                 </a>
+                <a href="#" class="menu-item" onclick="showSection('tareas'); return false;">
+                    <span class="menu-icon">📝</span>
+                    <span>Tareas</span>
+                </a>
                 <a href="#" class="menu-item" data-roles="estudiante" onclick="showSection('tutor'); return false;">
                     <span class="menu-icon">👨‍🏫</span>
                     <span>Mi Tutor</span>
@@ -508,6 +512,10 @@
                     <span class="menu-icon">💬</span>
                     <span>Foro de Clase</span>
                 </a>
+                <a href="#" class="menu-item" data-roles="staff" onclick="showSection('administracion'); return false;">
+                    <span class="menu-icon">⚙️</span>
+                    <span>Administración</span>
+                </a>
             </div>
         </div>
 
@@ -515,9 +523,8 @@
         <div class="content">
             <!-- Inicio Section -->
             <div id="inicio" class="section active">
-                <div class="period-info">
-                    <strong>Período:</strong> Octubre 2025 | <strong>Fecha Límite de Entrega:</strong> 22/10/2025
-                </div>
+                <!-- Lo llena app.js con el perfil y el calendario; oculto hasta tener datos -->
+                <div class="period-info" id="period-info" style="display: none;"></div>
 
                 <div class="welcome-banner">
                     <div class="banner-text">
@@ -747,6 +754,18 @@
                         <button class="btn btn-primary">Publicar</button>
                     </div>
                 </div>
+            </div>
+
+            <!-- Tareas Section -->
+            <div id="tareas" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📝 Tareas</h2>
+                <div id="tareas-contenido"><div class="card"><p>Cargando…</p></div></div>
+            </div>
+
+            <!-- Administración Section (solo staff) -->
+            <div id="administracion" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">⚙️ Administración</h2>
+                <div id="administracion-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Preparatoria Section -->

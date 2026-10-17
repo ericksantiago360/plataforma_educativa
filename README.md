@@ -18,16 +18,18 @@
 - ✅ Sidebar con perfil del estudiante
 - ✅ Dashboard con estadísticas del perfil académico
 - ✅ Menús según el rol del usuario
-- ✅ 9 secciones principales:
+- ✅ 11 secciones principales:
   - 🏠 Inicio
   - 📚 Biblioteca Digital
   - 📋 Control Escolar
+  - 📝 Tareas
   - 👨‍🏫 Mi Tutor
   - 🆘 Mesa de Ayuda
   - 📅 Calendario
   - 🌎 Centro de Idiomas
   - 🎥 Clases en Línea
   - 💬 Foro de Clase
+  - ⚙️ Administración (solo staff)
 
 ### **Servicios Académicos**
 - ✅ Preparatoria (Bachillerato General)
@@ -129,6 +131,9 @@ Filtros y acciones extra:
 - `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
 - `calendario/?proximos=1` omite los eventos que ya terminaron.
 - `POST idiomas/<id>/inscribir/` y `POST idiomas/<id>/cancelar/` inscriben o dan de baja al estudiante de la sesión (respetando el cupo).
+- `POST estudiantes/alta/` (staff) crea estudiante + cuenta (usuario = matrícula) + perfil y devuelve **una sola vez** la contraseña temporal.
+- `GET cursos/<id>/inscritos/` (profesor y staff), `POST cursos/<id>/inscribir/` y `POST cursos/<id>/quitar/` (staff) con `{estudiante}`.
+- `POST materias/<id>/inscribir_grupo/` (staff) con `{periodo}` crea el historial "cursando" de cada alumno activo del curso que aún no lo tenga.
 
 ---
 
@@ -145,9 +150,12 @@ Las cuentas las crea Control Escolar desde el panel de administración: primero 
 | Recurso | Estudiante | Profesor | Staff |
 |---------|------------|----------|-------|
 | Estudiantes, perfiles | Solo el suyo (lectura) | Alumnos de sus cursos (lectura) | Todo |
-| Cursos | Los que cursa (lectura) | Los suyos (edita, no crea ni borra) | Todo |
-| Tareas, clases, foros | Los de sus cursos (lectura) | Los de sus cursos (edita) | Todo |
-| Control escolar | Su historial (lectura) | Sus materias (edita calificaciones) | Todo |
+| Cursos | Los que cursa (lectura) | Los suyos (edita, no crea ni borra) | Todo, incluida la inscripción de alumnos |
+| Materias | Las de sus cursos (lectura) | Las de sus cursos (lectura) | Todo, incluida la inscripción del grupo |
+| Tareas | Las de sus cursos (lectura) | Crea y elimina en sus cursos | Todo |
+| Clases, foros | Los de sus cursos (lectura) | Los de sus cursos (edita) | Todo |
+| Control escolar | Su historial (lectura) | Captura calificaciones de sus materias | Todo |
+| Alta de estudiantes | — | — | Sí |
 | Mensajes de foro | Publica, edita y borra los suyos | Publica y edita los suyos; borra cualquiera de sus cursos (moderar) | Todo |
 | Mesa de ayuda | Abre y ve sus tickets | — | Todo (responde y cambia el estado) |
 | Calendario | Eventos generales y de sus cursos | Eventos generales y de sus cursos | Todo |
@@ -224,6 +232,18 @@ Si un usuario pide un registro que no le corresponde, la API responde **404** (n
 - promedio
 ```
 
+### Tabla: **Materia**
+```
+- id (PK)
+- curso (FK)
+- nombre
+- codigo (unique, se guarda en mayúsculas)
+- creditos (≥ 0)
+- nivel (semestre, ≥ 1)
+- descripcion
+- activo (inactiva = no admite inscripciones)
+```
+
 ### Tabla: **ControlEscolar** (historial académico)
 ```
 - id (PK)
@@ -295,7 +315,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 40 pruebas: autenticación y permisos (`cuentas/tests.py`) y servicios (`servicios/tests.py`).
+Son 66 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`), servicios, alta de estudiantes, inscripción a cursos, tareas, materias y calificaciones.
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -389,7 +409,10 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 
 ### Datos Reales desde la API
 - ✅ **Inicio:** bienvenida, tareas pendientes y estadísticas del perfil académico
-- ✅ **Control Escolar:** historial con calificaciones (estudiante) o calificaciones de sus grupos (profesor)
+- ✅ **Inicio:** banner con el periodo y la fecha límite del perfil (o la próxima entrega del calendario)
+- ✅ **Control Escolar:** historial con calificaciones (estudiante); el profesor captura calificaciones y el perfil del alumno se recalcula solo
+- ✅ **Tareas:** el profesor crea tareas para sus cursos (se asignan a todo el grupo); el estudiante ve las suyas y cuáles están vencidas
+- ✅ **Administración (staff):** alta de estudiantes con cuenta y perfil, inscripción a cursos, materias e inscripción del grupo a una materia
 - ✅ **Foro de Clase:** foros de tus cursos; publicar, editar y eliminar mensajes; los mensajes de profesores llevan etiqueta
 - ✅ **Clases en Línea:** lista de clases de Zoom
 - ✅ **Biblioteca Digital:** recursos con buscador y filtro por tipo
@@ -397,7 +420,6 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - ✅ **Mesa de Ayuda:** el estudiante abre tickets y ve las respuestas; el staff responde y cambia el estado
 - ✅ **Calendario:** próximos eventos generales y de tus cursos
 - ✅ **Centro de Idiomas:** cursos con cupos; inscribirse y cancelar la inscripción
-- 🔄 **Banner de período del inicio:** todavía es texto fijo
 
 ### Perfil del Estudiante
 - ✅ Avatar con iniciales
@@ -414,14 +436,13 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 ## 🔧 Próximas Mejoras Sugeridas
 
 ### Funcionalidades Prioritarias
-1. **Banner de período dinámico**
-   - Tomar el periodo actual del perfil y la fecha límite del calendario
+1. **Entregas de tareas**
+   - Que el estudiante suba su trabajo (requiere un modelo de entregas y almacenamiento de archivos)
+   - Que el profesor califique cada entrega
 
-2. **Formularios Completos**
-   - Crear estudiantes desde frontend
-   - Inscribir a cursos
-   - Subir tareas
-   - Captura de calificaciones por el profesor
+2. **Gestión de cuentas**
+   - Cambio de contraseña (hoy el estudiante conserva la temporal)
+   - Editar materias e inscribir a un alumno individual en una materia desde la página
 
 3. **Corregir la integración con Zoom**
    - Firma del Meeting SDK
@@ -491,11 +512,16 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Pruebas automáticas de permisos
 - [x] Biblioteca, Tutor, Mesa de Ayuda, Calendario e Idiomas conectados a la API
 - [x] Inscripción a cursos de idiomas con control de cupo
+- [x] Banner de período dinámico
+- [x] Alta de estudiantes con cuenta y perfil
+- [x] Inscripción de alumnos a cursos
+- [x] Creación de tareas por el profesor
+- [x] Captura de calificaciones con recálculo del perfil
+- [x] Materias e inscripción del grupo por periodo
 
 ### Pendientes 🔄
-- [ ] Banner de período dinámico
-- [ ] Formularios de creación
-- [ ] Captura de calificaciones desde el frontend
+- [ ] Entregas de tareas con archivos
+- [ ] Cambio de contraseña
 - [ ] Corregir integración con Zoom
 - [ ] Notificaciones por email
 - [ ] Reportes en PDF
