@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from cuentas.roles import GRUPO_PROFESOR
-from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar
+from .archivos import id_de_youtube, sanear_html
+from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar, ContenidoMateria, ArchivoContenido
 
 class MateriaSerializer(serializers.ModelSerializer):
     curso_nombre = serializers.CharField(source='curso.nombre', read_only=True)
@@ -94,3 +95,50 @@ class ControlEscolarSerializer(serializers.ModelSerializer):
     class Meta:
         model = ControlEscolar
         fields = '__all__'
+
+
+class ArchivoContenidoSerializer(serializers.ModelSerializer):
+    # Nunca se expone la ruta en disco: solo la URL que revisa permisos
+    url = serializers.SerializerMethodField()
+
+    def get_url(self, obj):
+        return f'/api/archivos-contenido/{obj.id}/descargar/'
+
+    class Meta:
+        model = ArchivoContenido
+        fields = ['id', 'nombre', 'tipo', 'tamano', 'subido', 'url']
+
+
+class ContenidoMateriaSerializer(serializers.ModelSerializer):
+    materia_nombre = serializers.CharField(source='materia.nombre', read_only=True)
+    curso = serializers.IntegerField(source='materia.curso_id', read_only=True)
+    autor_nombre = serializers.SerializerMethodField()
+    archivos = ArchivoContenidoSerializer(many=True, read_only=True)
+    video_url = serializers.CharField(write_only=True, required=False, allow_blank=True, max_length=300)
+
+    def get_autor_nombre(self, obj):
+        return (obj.autor.get_full_name() or obj.autor.username) if obj.autor else None
+
+    def validate_cuerpo(self, valor):
+        return sanear_html(valor)
+
+    def validate(self, datos):
+        # El enlace de YouTube se reduce al id del video; el reproductor se arma en el frontend con ese id
+        if 'video_url' in datos:
+            url = datos.pop('video_url').strip()
+            video = id_de_youtube(url) if url else ''
+            if video is None:
+                raise serializers.ValidationError({'video_url': 'Pega un enlace de YouTube válido (youtube.com/watch?v=… o youtu.be/…).'})
+            datos['video_youtube'] = video
+        return datos
+
+    def to_representation(self, instancia):
+        datos = super().to_representation(instancia)
+        datos['video_url'] = f'https://www.youtube.com/watch?v={instancia.video_youtube}' if instancia.video_youtube else ''
+        return datos
+
+    class Meta:
+        model = ContenidoMateria
+        fields = ['id', 'materia', 'materia_nombre', 'curso', 'titulo', 'cuerpo', 'video_url', 'video_youtube',
+                  'publicado', 'orden', 'autor_nombre', 'archivos', 'creado', 'actualizado']
+        read_only_fields = ['video_youtube']

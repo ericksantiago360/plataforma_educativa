@@ -1,14 +1,24 @@
+import os
 import re
 
-from rest_framework import status, viewsets
+from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import FileResponse, HttpResponse
+from django.utils.http import content_disposition_header
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from cuentas.permisos import AlcancePorRolMixin, AutorDelMensaje, ProfesorEscribe, SoloStaffEscribe
-from cuentas.roles import es_profesor, estudiante_de
-from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar
-from .serializers import MateriaSerializer, ClaseEnLineaSerializer, ForoClaseSerializer, MensajeForoSerializer, ControlEscolarSerializer
+from cuentas.permisos import ACCIONES_ESCRITURA, AlcancePorRolMixin, AutorDelMensaje, ProfesorEscribe, SoloStaffEscribe
+from cuentas.roles import ESTUDIANTE, es_profesor, estudiante_de, rol_de
+from .archivos import formato_de, validar_archivo
+from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar, ContenidoMateria, ArchivoContenido
+from .serializers import (MateriaSerializer, ClaseEnLineaSerializer, ForoClaseSerializer, MensajeForoSerializer,
+                          ControlEscolarSerializer, ContenidoMateriaSerializer, ArchivoContenidoSerializer)
+
+MAXIMO_ARCHIVOS_POR_CONTENIDO = 20
 
 PERIODO_VALIDO = re.compile(r'^\d{4}-\d{1,2}$')
 
@@ -110,3 +120,83 @@ class ControlEscolarViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
         perfil = getattr(estudiante, 'perfil', None)
         if perfil:
             perfil.recalcular()
+
+class ContenidoMateriaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
+    queryset = ContenidoMateria.objects.select_related('materia__curso', 'autor').prefetch_related('archivos')
+    serializer_class = ContenidoMateriaSerializer
+    permission_classes = [IsAuthenticated, ProfesorEscribe]
+    acciones_profesor = ACCIONES_ESCRITURA + ('subir_archivo',)
+    ruta_curso = 'materia__curso'
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # Los estudiantes solo ven lo publicado de materias activas; los borradores son del profesor
+        if rol_de(self.request.user) == ESTUDIANTE:
+            qs = qs.filter(publicado=True, materia__activo=True)
+        materia = self.request.query_params.get('materia')
+        if materia is not None:
+            if not materia.isdigit():
+                raise ValidationError({'materia': 'Debe ser un id numérico.'})
+            qs = qs.filter(materia_id=materia)
+        return qs
+
+    def perform_create(self, serializer):
+        self.verificar_curso_propio(serializer)
+        serializer.save(autor=self.request.user)
+
+    @action(detail=True, methods=['post'], parser_classes=[MultiPartParser])
+    def subir_archivo(self, request, pk=None):
+        contenido = self.get_object()  # para el profesor, solo contenidos de sus cursos
+        archivo = request.FILES.get('archivo')
+        if archivo is None:
+            return Response({'archivo': ['Adjunta un archivo.']}, status=status.HTTP_400_BAD_REQUEST)
+        if contenido.archivos.count() >= MAXIMO_ARCHIVOS_POR_CONTENIDO:
+            return Response({'archivo': [f'Máximo {MAXIMO_ARCHIVOS_POR_CONTENIDO} archivos por contenido.']},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tipo = validar_archivo(archivo)
+        except DjangoValidationError as error:
+            return Response({'archivo': error.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+        nuevo = ArchivoContenido.objects.create(
+            contenido=contenido,
+            archivo=archivo,
+            nombre=os.path.basename(archivo.name)[:255],
+            tipo=tipo,
+            tamano=archivo.size,
+        )
+        return Response(ArchivoContenidoSerializer(nuevo).data, status=status.HTTP_201_CREATED)
+
+class ArchivoContenidoViewSet(AlcancePorRolMixin, mixins.RetrieveModelMixin, mixins.DestroyModelMixin,
+                              viewsets.GenericViewSet):
+    queryset = ArchivoContenido.objects.select_related('contenido__materia__curso')
+    serializer_class = ArchivoContenidoSerializer
+    permission_classes = [IsAuthenticated, ProfesorEscribe]
+    acciones_profesor = ('destroy',)
+    ruta_curso = 'contenido__materia__curso'
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if rol_de(self.request.user) == ESTUDIANTE:
+            qs = qs.filter(contenido__publicado=True, contenido__materia__activo=True)
+        return qs
+
+    @action(detail=True, methods=['get'])
+    def descargar(self, request, pk=None):
+        adjunto = self.get_object()  # aplica los mismos permisos que ver el contenido
+        formato = formato_de(adjunto.archivo.name)
+        tipo_mime = formato[1] if formato else 'application/octet-stream'
+
+        if settings.SERVIR_ARCHIVOS_CON_NGINX:
+            # nginx envía el archivo desde una ruta interna (no accesible desde fuera) y soporta rangos (videos)
+            respuesta = HttpResponse(content_type=tipo_mime)
+            respuesta['X-Accel-Redirect'] = f'/archivos-protegidos/{adjunto.archivo.name}'
+        else:
+            respuesta = FileResponse(adjunto.archivo.open('rb'), content_type=tipo_mime)
+
+        # Imágenes, videos y PDF se muestran en el navegador; Office se descarga
+        en_linea = adjunto.tipo in ('imagen', 'video') or tipo_mime == 'application/pdf'
+        respuesta['Content-Disposition'] = content_disposition_header(not en_linea, adjunto.nombre)
+        respuesta['X-Content-Type-Options'] = 'nosniff'
+        respuesta['Cache-Control'] = 'private, max-age=3600'
+        return respuesta

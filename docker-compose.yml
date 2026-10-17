@@ -38,6 +38,7 @@ services:
       - DB_PASSWORD=admin_password
       - DB_HOST=db
       - DB_PORT=3306
+      - SERVIR_ARCHIVOS_CON_NGINX=True
     depends_on:
       db:
         condition: service_healthy
@@ -50,6 +51,7 @@ services:
     volumes:
       - ./frontend:/usr/share/nginx/html
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./backend/media:/srv/archivos:ro   # adjuntos de materias (solo lectura para nginx)
     ports:
       - "80:80"
     depends_on:

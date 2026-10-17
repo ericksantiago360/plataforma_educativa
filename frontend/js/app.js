@@ -215,6 +215,9 @@ function showSection(sectionId) {
         case 'tareas':
             loadTareas();
             break;
+        case 'contenido':
+            loadContenido();
+            break;
         case 'administracion':
             loadAdministracion();
             break;
@@ -1671,6 +1674,516 @@ async function cambiarInscripcionCurso(cursoId, accion, estudianteId) {
         return;
     }
     await cargarInscripcion();
+}
+
+// ---------- Contenido de Materias ----------
+
+let materiasContenido = [];
+let materiaContenidoId = null;
+
+// Igual que en el backend (academico/archivos.py): el servidor vuelve a validar todo
+const FORMATOS_ADJUNTO = {
+    pdf: 'documento', doc: 'documento', docx: 'documento', ppt: 'documento', pptx: 'documento',
+    xls: 'documento', xlsx: 'documento',
+    jpg: 'imagen', jpeg: 'imagen', png: 'imagen', gif: 'imagen', webp: 'imagen',
+    mp4: 'video', webm: 'video',
+};
+const LIMITE_ADJUNTO_MB = { documento: 25, imagen: 10, video: 200 };
+const ICONOS_DOCUMENTO = { pdf: '📕', doc: '📘', docx: '📘', ppt: '📙', pptx: '📙', xls: '📗', xlsx: '📗' };
+
+const TINYMCE_BASE = 'https://cdn.jsdelivr.net/npm/tinymce@6.8.5';
+const TINYMCE_IDIOMA = 'https://cdn.jsdelivr.net/npm/tinymce-i18n@24.7.29/langs6/es_MX.js';
+let promesaTinyMCE = null;
+
+function extensionDe(nombre) {
+    const partes = nombre.toLowerCase().split('.');
+    return partes.length > 1 ? partes.pop() : '';
+}
+
+function formatoTamano(bytes) {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function puedeEditarContenido() {
+    return Boolean(usuarioActual) && ['profesor', 'staff'].includes(usuarioActual.rol);
+}
+
+function cargarTinyMCE() {
+    if (window.tinymce) return Promise.resolve(window.tinymce);
+    if (!promesaTinyMCE) {
+        promesaTinyMCE = new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = `${TINYMCE_BASE}/tinymce.min.js`;
+            script.referrerPolicy = 'origin';
+            script.onload = () => resolve(window.tinymce);
+            script.onerror = () => {
+                promesaTinyMCE = null;
+                reject(new Error('No se pudo cargar el editor'));
+            };
+            document.head.appendChild(script);
+        });
+    }
+    return promesaTinyMCE;
+}
+
+function cerrarEditorContenido() {
+    if (window.tinymce) window.tinymce.remove('#contenido-cuerpo');
+}
+
+async function loadContenido() {
+    const container = document.getElementById('contenido-contenido');
+    if (!container) return;
+    cerrarEditorContenido();
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    try {
+        const materias = await getTodas('/materias/');
+        // Para el estudiante, las materias inactivas no tienen contenido visible
+        materiasContenido = puedeEditarContenido() ? materias : materias.filter(m => m.activo);
+    } catch (error) {
+        console.error('Error cargando materias:', error);
+        errorDeCarga(container, 'las materias');
+        return;
+    }
+
+    if (materiasContenido.length === 0) {
+        container.innerHTML = '<div class="card"><p>No tienes materias con contenido disponible.</p></div>';
+        return;
+    }
+    if (!materiasContenido.some(m => String(m.id) === String(materiaContenidoId))) {
+        materiaContenidoId = materiasContenido[0].id;
+    }
+
+    const opciones = materiasContenido.map(m => `
+        <option value="${escapeHtml(m.id)}"${String(m.id) === String(materiaContenidoId) ? ' selected' : ''}>
+            ${escapeHtml(m.curso_nombre)} · ${escapeHtml(m.codigo)} ${escapeHtml(m.nombre)}${m.activo ? '' : ' (inactiva)'}
+        </option>`).join('');
+
+    container.innerHTML = `
+        <div class="card" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 240px;">
+                <label for="contenido-materia" style="display: block; margin-bottom: 0.5rem;">Materia</label>
+                <select id="contenido-materia" style="${ESTILO_CAMPO}">${opciones}</select>
+            </div>
+            ${puedeEditarContenido() ? '<button type="button" class="btn btn-primary" id="contenido-nuevo">+ Nuevo contenido</button>' : ''}
+        </div>
+        <div id="contenido-area"></div>
+    `;
+
+    document.getElementById('contenido-materia').addEventListener('change', evento => {
+        materiaContenidoId = evento.target.value;
+        listarContenidos();
+    });
+    const nuevo = document.getElementById('contenido-nuevo');
+    if (nuevo) nuevo.addEventListener('click', () => editarContenido(null));
+    await listarContenidos();
+}
+
+async function listarContenidos() {
+    const area = document.getElementById('contenido-area');
+    cerrarEditorContenido();
+    area.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+
+    let contenidos;
+    try {
+        contenidos = await getTodas(`/contenidos/?materia=${encodeURIComponent(materiaContenidoId)}`);
+    } catch (error) {
+        console.error('Error cargando contenidos:', error);
+        errorDeCarga(area, 'el contenido');
+        return;
+    }
+
+    if (contenidos.length === 0) {
+        area.innerHTML = `<div class="card"><p>${puedeEditarContenido()
+            ? 'Esta materia aún no tiene contenido. Usa "+ Nuevo contenido" para crear el primero.'
+            : 'Tu profesor aún no ha publicado contenido en esta materia.'}</p></div>`;
+        return;
+    }
+
+    area.innerHTML = '<div class="clases-list">' + contenidos.map(contenido => {
+        const cuenta = tipo => contenido.archivos.filter(a => a.tipo === tipo).length;
+        const resumen = [
+            cuenta('documento') && `📄 ${cuenta('documento')}`,
+            cuenta('imagen') && `🖼️ ${cuenta('imagen')}`,
+            (cuenta('video') + (contenido.video_youtube ? 1 : 0)) && `🎬 ${cuenta('video') + (contenido.video_youtube ? 1 : 0)}`,
+        ].filter(Boolean).join(' · ');
+        const fecha = new Date(contenido.actualizado).toLocaleDateString('es-MX', { dateStyle: 'medium' });
+        return `
+            <div class="clase-item contenido-item" data-contenido-id="${escapeHtml(contenido.id)}" style="cursor: pointer;">
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(contenido.titulo)}</div>
+                    ${puedeEditarContenido()
+                        ? `<div class="clase-badge ${contenido.publicado ? 'badge-completed' : 'badge-neutral'}">${contenido.publicado ? 'Publicado' : 'Borrador'}</div>`
+                        : ''}
+                </div>
+                <div style="color: var(--gray-700); font-size: 0.85rem;">
+                    Actualizado el ${escapeHtml(fecha)}${resumen ? ` · ${resumen}` : ''}
+                </div>
+            </div>
+        `;
+    }).join('') + '</div>';
+
+    area.querySelectorAll('.contenido-item').forEach(item => {
+        item.addEventListener('click', () => verContenido(contenidos.find(c => String(c.id) === item.dataset.contenidoId)));
+    });
+}
+
+function verContenido(contenido) {
+    const area = document.getElementById('contenido-area');
+    cerrarEditorContenido();
+
+    const imagenes = contenido.archivos.filter(a => a.tipo === 'imagen');
+    const videos = contenido.archivos.filter(a => a.tipo === 'video');
+    const documentos = contenido.archivos.filter(a => a.tipo === 'documento');
+    const fecha = new Date(contenido.actualizado).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+    // El id viene validado del servidor; se revisa otra vez antes de armar la URL del reproductor
+    const youtube = /^[A-Za-z0-9_-]{11}$/.test(contenido.video_youtube || '') ? contenido.video_youtube : null;
+
+    area.innerHTML = `
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                <button type="button" class="btn btn-primary" id="contenido-volver">← Volver</button>
+                ${puedeEditarContenido() ? `
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button type="button" class="btn-salir" id="contenido-editar">Editar</button>
+                        <button type="button" id="contenido-eliminar" style="${ESTILO_ACCION} color: var(--danger);">Eliminar</button>
+                    </div>` : ''}
+            </div>
+            <h3 style="margin-bottom: 0.25rem;">${escapeHtml(contenido.titulo)}
+                ${puedeEditarContenido() && !contenido.publicado ? '<span class="clase-badge badge-neutral" style="margin-left: 0.5rem;">Borrador</span>' : ''}
+            </h3>
+            <p style="color: var(--gray-700); font-size: 0.85rem; margin-bottom: 1.25rem;">
+                ${escapeHtml(contenido.materia_nombre)} · ${contenido.autor_nombre ? `${escapeHtml(contenido.autor_nombre)} · ` : ''}${escapeHtml(fecha)}
+            </p>
+
+            <div class="contenido-cuerpo" id="contenido-cuerpo-vista"></div>
+
+            ${youtube ? `
+                <div class="contenido-video" style="margin-top: 1.25rem;">
+                    <iframe src="https://www.youtube-nocookie.com/embed/${youtube}" title="Video de YouTube"
+                            allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                            referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+                </div>` : ''}
+
+            ${videos.map(video => `
+                <div style="margin-top: 1.25rem;">
+                    <div class="contenido-video"><video controls preload="metadata" src="${escapeHtml(video.url)}"></video></div>
+                    <div style="color: var(--gray-700); font-size: 0.85rem; margin-top: 0.25rem;">🎬 ${escapeHtml(video.nombre)}</div>
+                </div>`).join('')}
+
+            ${imagenes.length ? `
+                <h4 style="margin: 1.5rem 0 0.75rem;">Imágenes</h4>
+                <div class="contenido-galeria">
+                    ${imagenes.map(imagen => `
+                        <a href="${escapeHtml(imagen.url)}" target="_blank" rel="noopener" title="${escapeHtml(imagen.nombre)}">
+                            <img src="${escapeHtml(imagen.url)}" alt="${escapeHtml(imagen.nombre)}" loading="lazy">
+                        </a>`).join('')}
+                </div>` : ''}
+
+            ${documentos.length ? `
+                <h4 style="margin: 1.5rem 0 0.75rem;">Documentos</h4>
+                ${documentos.map(documento => `
+                    <a class="clase-item" href="${escapeHtml(documento.url)}" target="_blank" rel="noopener"
+                       style="display: flex; justify-content: space-between; align-items: center; text-decoration: none; color: inherit;">
+                        <span>${ICONOS_DOCUMENTO[extensionDe(documento.nombre)] || '📄'} ${escapeHtml(documento.nombre)}</span>
+                        <span style="color: var(--gray-700); font-size: 0.85rem; white-space: nowrap;">
+                            ${escapeHtml(formatoTamano(documento.tamano))} · ${extensionDe(documento.nombre) === 'pdf' ? 'Abrir' : 'Descargar'}
+                        </span>
+                    </a>`).join('')}` : ''}
+        </div>
+    `;
+
+    // HTML saneado por el servidor (solo formato, enlaces y tablas); las tablas se envuelven para desplazarse en móvil
+    const cuerpo = document.getElementById('contenido-cuerpo-vista');
+    cuerpo.innerHTML = contenido.cuerpo || '';
+    cuerpo.querySelectorAll('table').forEach(tabla => {
+        const envoltura = document.createElement('div');
+        envoltura.className = 'tabla-desplazable';
+        tabla.replaceWith(envoltura);
+        envoltura.appendChild(tabla);
+    });
+    cuerpo.querySelectorAll('a').forEach(enlace => {
+        enlace.target = '_blank';
+        enlace.rel = 'noopener noreferrer';
+    });
+
+    document.getElementById('contenido-volver').addEventListener('click', listarContenidos);
+    if (puedeEditarContenido()) {
+        document.getElementById('contenido-editar').addEventListener('click', () => editarContenido(contenido));
+        document.getElementById('contenido-eliminar').addEventListener('click', () => eliminarContenido(contenido));
+    }
+}
+
+async function eliminarContenido(contenido) {
+    if (!confirm(`¿Eliminar "${contenido.titulo}" y todos sus archivos? No se puede deshacer.`)) return;
+    try {
+        const response = await api(`/contenidos/${encodeURIComponent(contenido.id)}/`, { method: 'DELETE' });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo eliminar.'));
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    await listarContenidos();
+}
+
+// Editor para crear (contenido = null) o editar
+async function editarContenido(contenido) {
+    const area = document.getElementById('contenido-area');
+    cerrarEditorContenido();
+    const aceptados = Object.keys(FORMATOS_ADJUNTO).map(e => `.${e}`).join(',');
+
+    area.innerHTML = `
+        <div class="card">
+            <h3 style="margin-bottom: 1rem;">${contenido ? 'Editar contenido' : 'Nuevo contenido'}</h3>
+            <form id="contenido-form">
+                <div style="margin-bottom: 1rem;">
+                    <label for="contenido-titulo" style="display: block; margin-bottom: 0.5rem;">Título</label>
+                    <input id="contenido-titulo" required maxlength="200" style="${ESTILO_CAMPO}"
+                           placeholder="Unidad 1: Introducción" value="${escapeHtml(contenido ? contenido.titulo : '')}">
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="contenido-cuerpo" style="display: block; margin-bottom: 0.5rem;">Texto (puedes insertar tablas)</label>
+                    <textarea id="contenido-cuerpo" rows="12" style="${ESTILO_CAMPO}">${escapeHtml(contenido ? contenido.cuerpo : '')}</textarea>
+                    <p id="contenido-aviso-editor" style="color: var(--gray-700); font-size: 0.85rem; margin-top: 0.25rem;"></p>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label for="contenido-youtube" style="display: block; margin-bottom: 0.5rem;">Video de YouTube (opcional)</label>
+                    <input id="contenido-youtube" type="url" maxlength="300" style="${ESTILO_CAMPO}"
+                           placeholder="https://www.youtube.com/watch?v=…" value="${escapeHtml(contenido ? contenido.video_url : '')}">
+                </div>
+
+                <div style="margin-bottom: 1rem;">
+                    <label for="contenido-archivos" style="display: block; margin-bottom: 0.5rem;">Adjuntos</label>
+                    ${contenido && contenido.archivos.length ? `
+                        <div id="contenido-adjuntos-actuales" style="margin-bottom: 0.75rem;">
+                            ${contenido.archivos.map(archivo => `
+                                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0; border-bottom: 1px solid var(--gray-200);">
+                                    <span>${archivo.tipo === 'imagen' ? '🖼️' : archivo.tipo === 'video' ? '🎬' : '📄'} ${escapeHtml(archivo.nombre)}
+                                        <span style="color: var(--gray-700); font-size: 0.85rem;">· ${escapeHtml(formatoTamano(archivo.tamano))}</span></span>
+                                    <button type="button" class="adjunto-quitar" data-archivo-id="${escapeHtml(archivo.id)}"
+                                            style="${ESTILO_ACCION} color: var(--danger);">Quitar</button>
+                                </div>`).join('')}
+                        </div>` : ''}
+                    <input id="contenido-archivos" type="file" multiple accept="${aceptados}" style="${ESTILO_CAMPO}">
+                    <p style="color: var(--gray-700); font-size: 0.8rem; margin-top: 0.25rem;">
+                        PDF, Word, PowerPoint y Excel (hasta ${LIMITE_ADJUNTO_MB.documento} MB) · JPG, PNG, GIF y WebP
+                        (hasta ${LIMITE_ADJUNTO_MB.imagen} MB) · MP4 y WebM (hasta ${LIMITE_ADJUNTO_MB.video} MB)
+                    </p>
+                    <div id="contenido-seleccion" style="margin-top: 0.5rem;"></div>
+                </div>
+
+                <label style="display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem; cursor: pointer;">
+                    <input type="checkbox" id="contenido-publicado" ${!contenido || contenido.publicado ? 'checked' : ''}>
+                    Publicado (visible para los alumnos)
+                </label>
+
+                <p id="contenido-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em; margin-bottom: 0.5rem; white-space: pre-line;"></p>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-primary" type="submit" id="contenido-guardar">Guardar</button>
+                    <button class="btn-salir" type="button" id="contenido-cancelar">Cancelar</button>
+                </div>
+            </form>
+        </div>
+    `;
+
+    document.getElementById('contenido-cancelar').addEventListener('click', () =>
+        (contenido ? verContenido(contenido) : listarContenidos()));
+    document.getElementById('contenido-archivos').addEventListener('change', mostrarSeleccionAdjuntos);
+    document.getElementById('contenido-form').addEventListener('submit', evento => guardarContenido(evento, contenido));
+    area.querySelectorAll('.adjunto-quitar').forEach(boton => {
+        boton.addEventListener('click', () => quitarAdjunto(contenido, boton.dataset.archivoId));
+    });
+
+    try {
+        const tinymce = await cargarTinyMCE();
+        await tinymce.init({
+            selector: '#contenido-cuerpo',
+            language: 'es_MX',
+            language_url: TINYMCE_IDIOMA,
+            base_url: TINYMCE_BASE,
+            suffix: '.min',
+            height: 380,
+            menubar: false,
+            branding: false,
+            promotion: false,
+            plugins: 'lists link autolink table',
+            toolbar: 'undo redo | blocks | bold italic underline strikethrough | bullist numlist blockquote | link table | removeformat',
+            block_formats: 'Párrafo=p; Título=h2; Subtítulo=h3; Sección=h4',
+            table_default_styles: {},
+            // Imágenes y videos van como adjuntos, no incrustados en el texto
+            paste_data_images: false,
+            invalid_elements: 'img,video,iframe,script,style,object,embed',
+            link_default_target: '_blank',
+            content_style: 'body { font-family: Segoe UI, Tahoma, sans-serif; font-size: 15px; } table td, table th { border: 1px solid #ccc; padding: 4px 8px; }',
+        });
+    } catch (error) {
+        console.error(error);
+        document.getElementById('contenido-aviso-editor').textContent =
+            'No se pudo cargar el editor enriquecido (¿sin internet?). Escribe texto simple: cada línea en blanco separa un párrafo.';
+    }
+}
+
+function mostrarSeleccionAdjuntos() {
+    const archivos = Array.from(document.getElementById('contenido-archivos').files);
+    document.getElementById('contenido-seleccion').innerHTML = archivos.map((archivo, i) => {
+        const problema = problemaDeAdjunto(archivo);
+        return `
+            <div style="padding: 0.4rem 0;" data-indice="${i}">
+                <div style="display: flex; justify-content: space-between; gap: 1rem;">
+                    <span>${escapeHtml(archivo.name)} <span style="color: var(--gray-700); font-size: 0.85rem;">· ${escapeHtml(formatoTamano(archivo.size))}</span></span>
+                    <span class="adjunto-estado" style="font-size: 0.85rem; color: ${problema ? 'var(--danger)' : 'var(--gray-700)'};">${escapeHtml(problema || 'Listo para subir')}</span>
+                </div>
+                <div class="barra-progreso"><div></div></div>
+            </div>
+        `;
+    }).join('');
+}
+
+function problemaDeAdjunto(archivo) {
+    const tipo = FORMATOS_ADJUNTO[extensionDe(archivo.name)];
+    if (!tipo) return 'Formato no permitido';
+    if (archivo.size > LIMITE_ADJUNTO_MB[tipo] * 1024 * 1024) return `Supera ${LIMITE_ADJUNTO_MB[tipo]} MB`;
+    return null;
+}
+
+function obtenerCuerpo() {
+    const editor = window.tinymce && window.tinymce.get('contenido-cuerpo');
+    if (editor) return editor.getContent();
+    // Sin editor: texto simple → párrafos (escapado; el servidor además sanea)
+    return document.getElementById('contenido-cuerpo').value
+        .split(/\n\s*\n/)
+        .map(parrafo => parrafo.trim())
+        .filter(Boolean)
+        .map(parrafo => `<p>${escapeHtml(parrafo).replace(/\n/g, '<br>')}</p>`)
+        .join('');
+}
+
+// Subida con XMLHttpRequest para poder mostrar el progreso (fetch no lo informa)
+function subirAdjunto(contenidoId, archivo, alProgresar) {
+    return new Promise(resolve => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `/api/contenidos/${encodeURIComponent(contenidoId)}/subir_archivo/`);
+        xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
+        xhr.upload.onprogress = evento => {
+            if (evento.lengthComputable) alProgresar(evento.loaded / evento.total);
+        };
+        xhr.onload = () => {
+            let datos = {};
+            try { datos = JSON.parse(xhr.responseText); } catch { /* respuesta sin JSON */ }
+            if (xhr.status === 413) datos = { detail: 'El archivo supera el tamaño que acepta el servidor.' };
+            resolve({ ok: xhr.status >= 200 && xhr.status < 300, datos });
+        };
+        xhr.onerror = () => resolve({ ok: false, datos: { detail: 'No hay conexión con el servidor.' } });
+        const formulario = new FormData();
+        formulario.append('archivo', archivo);
+        xhr.send(formulario);
+    });
+}
+
+async function guardarContenido(evento, contenido) {
+    evento.preventDefault();
+    const error = document.getElementById('contenido-error');
+    const boton = document.getElementById('contenido-guardar');
+    const archivos = Array.from(document.getElementById('contenido-archivos').files);
+
+    const titulo = document.getElementById('contenido-titulo').value.trim();
+    if (!titulo) {
+        error.textContent = 'Escribe un título.';
+        return;
+    }
+    const invalidos = archivos.filter(problemaDeAdjunto);
+    if (invalidos.length) {
+        error.textContent = 'Quita los archivos marcados en rojo antes de guardar.';
+        return;
+    }
+
+    error.textContent = '';
+    boton.disabled = true;
+    boton.textContent = 'Guardando…';
+
+    let guardado;
+    try {
+        const response = await api(contenido ? `/contenidos/${encodeURIComponent(contenido.id)}/` : '/contenidos/', {
+            method: contenido ? 'PATCH' : 'POST',
+            body: JSON.stringify({
+                materia: materiaContenidoId,
+                titulo,
+                cuerpo: obtenerCuerpo(),
+                video_url: document.getElementById('contenido-youtube').value.trim(),
+                publicado: document.getElementById('contenido-publicado').checked,
+            }),
+        });
+        guardado = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            error.textContent = mensajeDeError(guardado, 'No se pudo guardar el contenido.');
+            boton.disabled = false;
+            boton.textContent = 'Guardar';
+            return;
+        }
+    } catch {
+        error.textContent = 'No hay conexión con el servidor.';
+        boton.disabled = false;
+        boton.textContent = 'Guardar';
+        return;
+    }
+
+    // Adjuntos uno por uno, con su barra de progreso
+    const fallidos = [];
+    for (const [indice, archivo] of archivos.entries()) {
+        const fila = document.querySelector(`#contenido-seleccion [data-indice="${indice}"]`);
+        const barra = fila.querySelector('.barra-progreso > div');
+        const estado = fila.querySelector('.adjunto-estado');
+        estado.textContent = 'Subiendo…';
+        boton.textContent = `Subiendo ${indice + 1} de ${archivos.length}…`;
+        const resultado = await subirAdjunto(guardado.id, archivo, fraccion => { barra.style.width = `${Math.round(fraccion * 100)}%`; });
+        if (resultado.ok) {
+            barra.style.width = '100%';
+            estado.textContent = '✅ Subido';
+        } else {
+            const motivo = mensajeDeError(resultado.datos, 'Error al subir');
+            estado.style.color = 'var(--danger)';
+            estado.textContent = motivo;
+            fallidos.push(`${archivo.name}: ${motivo}`);
+        }
+    }
+
+    // Se recarga el contenido para mostrar los adjuntos que sí se guardaron
+    const actualizado = await api(`/contenidos/${encodeURIComponent(guardado.id)}/`).then(r => r.json()).catch(() => guardado);
+    if (fallidos.length) {
+        await editarContenido(actualizado);
+        document.getElementById('contenido-error').textContent =
+            'El contenido se guardó, pero algunos archivos no se subieron:\n' + fallidos.join('\n');
+        return;
+    }
+    verContenido(actualizado);
+}
+
+async function quitarAdjunto(contenido, archivoId) {
+    if (!confirm('¿Quitar este archivo? Se borrará definitivamente.')) return;
+    try {
+        const response = await api(`/archivos-contenido/${encodeURIComponent(archivoId)}/`, { method: 'DELETE' });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo quitar el archivo.'));
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    // Conserva lo que se haya escrito en el formulario al volver a dibujarlo
+    const borrador = {
+        ...contenido,
+        titulo: document.getElementById('contenido-titulo').value,
+        cuerpo: obtenerCuerpo(),
+        video_url: document.getElementById('contenido-youtube').value,
+        publicado: document.getElementById('contenido-publicado').checked,
+        archivos: contenido.archivos.filter(a => String(a.id) !== String(archivoId)),
+    };
+    await editarContenido(borrador);
 }
 
 window.addEventListener('DOMContentLoaded', () => {

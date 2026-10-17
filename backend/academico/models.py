@@ -1,5 +1,10 @@
+import os
+import uuid
+
 from django.conf import settings
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
 from estudiantes.models import Estudiante
 from cursos.models import Curso
 
@@ -93,3 +98,56 @@ class ControlEscolar(models.Model):
     
     def __str__(self):
         return f"{self.estudiante.nombre} - {self.materia.nombre}"
+
+
+def ruta_archivo_contenido(instancia, nombre_original):
+    # Nombre aleatorio: evita choques y que la ruta revele o permita adivinar el nombre original
+    extension = os.path.splitext(nombre_original)[1].lower()
+    return f'contenidos/materia_{instancia.contenido.materia_id}/{uuid.uuid4().hex}{extension}'
+
+class ContenidoMateria(models.Model):
+    materia = models.ForeignKey(Materia, on_delete=models.CASCADE, related_name='contenidos')
+    titulo = models.CharField(max_length=200)
+    cuerpo = models.TextField(blank=True)  # HTML ya saneado (ver archivos.sanear_html)
+    video_youtube = models.CharField(max_length=11, blank=True)  # solo el id del video
+    publicado = models.BooleanField(default=False)
+    orden = models.PositiveIntegerField(default=0)
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+                              related_name='contenidos_creados')
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['orden', 'creado']
+        verbose_name = 'Contenido de materia'
+        verbose_name_plural = 'Contenidos de materias'
+
+    def __str__(self):
+        return f"{self.materia.codigo} - {self.titulo}"
+
+class ArchivoContenido(models.Model):
+    TIPOS = [
+        ('documento', 'Documento'),
+        ('imagen', 'Imagen'),
+        ('video', 'Video'),
+    ]
+
+    contenido = models.ForeignKey(ContenidoMateria, on_delete=models.CASCADE, related_name='archivos')
+    archivo = models.FileField(upload_to=ruta_archivo_contenido)
+    nombre = models.CharField(max_length=255)  # nombre original, para mostrarlo y descargarlo
+    tipo = models.CharField(max_length=10, choices=TIPOS)
+    tamano = models.PositiveBigIntegerField()
+    subido = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['tipo', 'subido']
+        verbose_name = 'Archivo de contenido'
+        verbose_name_plural = 'Archivos de contenido'
+
+    def __str__(self):
+        return self.nombre
+
+@receiver(post_delete, sender=ArchivoContenido)
+def borrar_archivo_del_disco(sender, instance, **kwargs):
+    # También se ejecuta al borrar el contenido o la materia (borrado en cascada)
+    instance.archivo.delete(save=False)

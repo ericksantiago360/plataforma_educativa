@@ -3,7 +3,9 @@ from django.contrib.auth.models import Group, User
 from estudiantes.models import Estudiante
 from cursos.models import Curso
 from coordinacion.models import Tarea, Comunicado
-from academico.models import Materia, ControlEscolar, ClaseEnLinea, ForoClase, MensajeForo
+from academico.archivos import sanear_html
+from academico.models import (Materia, ControlEscolar, ClaseEnLinea, ForoClase, MensajeForo,
+                              ContenidoMateria, ArchivoContenido)
 from perfiles.models import PerfilEstudiante, Tutor, AsignacionTutor
 from servicios.models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
 from django.utils import timezone
@@ -244,6 +246,58 @@ MesaAyuda.objects.create(estudiante=est2, categoria='tecnico', asunto='No puedo 
                          estado='resuelto', respuesta='Ya quedó corregido el permiso. Intenta de nuevo, por favor.')
 MesaAyuda.objects.create(estudiante=est2, categoria='administrativo', asunto='Constancia de estudios',
                          descripcion='Necesito una constancia de estudios para mi trabajo.')
+
+# Contenido de materias: texto con tabla, video de YouTube y adjuntos (PDF e imagen generados aquí mismo)
+def pdf_de_ejemplo(texto):
+    flujo = f'BT /F1 18 Tf 72 720 Td ({texto}) Tj ET'.encode('latin-1')
+    objetos = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>',
+        b'<< /Length ' + str(len(flujo)).encode() + b' >>\nstream\n' + flujo + b'\nendstream',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    ]
+    pdf, posiciones = b'%PDF-1.4\n', []
+    for numero, objeto in enumerate(objetos, start=1):
+        posiciones.append(len(pdf))
+        pdf += f'{numero} 0 obj\n'.encode() + objeto + b'\nendobj\n'
+    inicio_xref = len(pdf)
+    pdf += f'xref\n0 {len(objetos) + 1}\n0000000000 65535 f \n'.encode()
+    pdf += b''.join(f'{p:010d} 00000 n \n'.encode() for p in posiciones)
+    pdf += f'trailer\n<< /Size {len(objetos) + 1} /Root 1 0 R >>\nstartxref\n{inicio_xref}\n%%EOF\n'.encode()
+    return pdf
+
+def png_de_ejemplo(ancho=320, alto=180):
+    import struct, zlib
+    # cada fila: byte de filtro + RGB por pixel (degradado)
+    filas = b''.join(b'\x00' + b''.join(bytes((40 + x * 180 // ancho, 90, 200 - y * 120 // alto)) for x in range(ancho))
+                     for y in range(alto))
+    def bloque(tipo, datos):
+        return struct.pack('>I', len(datos)) + tipo + datos + struct.pack('>I', zlib.crc32(tipo + datos) & 0xffffffff)
+    return (b'\x89PNG\r\n\x1a\n' + bloque(b'IHDR', struct.pack('>IIBBBBB', ancho, alto, 8, 2, 0, 0, 0))
+            + bloque(b'IDAT', zlib.compress(filas)) + bloque(b'IEND', b''))
+
+from django.core.files.base import ContentFile
+leccion = ContenidoMateria.objects.create(
+    materia=mat_comp, autor=prof_alfonso, publicado=True, orden=1,
+    titulo='Unidad 3: Teorías de la motivación',
+    cuerpo=sanear_html(
+        '<h2>Objetivo</h2><p>Comparar las principales teorías de la motivación y aplicarlas a casos reales.</p>'
+        '<h3>Resumen de teorías</h3>'
+        '<table><thead><tr><th>Teoría</th><th>Autor</th><th>Idea central</th></tr></thead><tbody>'
+        '<tr><td>Jerarquía de necesidades</td><td>Maslow</td><td>Las necesidades se satisfacen por niveles.</td></tr>'
+        '<tr><td>Dos factores</td><td>Herzberg</td><td>Factores higiénicos vs. motivadores.</td></tr>'
+        '<tr><td>Expectativas</td><td>Vroom</td><td>Esfuerzo → desempeño → recompensa.</td></tr>'
+        '</tbody></table>'
+        '<p><strong>Actividad:</strong> lee la guía en PDF y comenta un ejemplo en el foro.</p>'),
+    video_youtube='Lp7E973zozc',
+)
+for nombre, datos, tipo in [('Guía de la unidad 3.pdf', pdf_de_ejemplo('Guia de la unidad 3 - Teorias de la motivacion'), 'documento'),
+                            ('Diagrama de motivación.png', png_de_ejemplo(), 'imagen')]:
+    adjunto = ArchivoContenido(contenido=leccion, nombre=nombre, tipo=tipo, tamano=len(datos))
+    adjunto.archivo.save(nombre, ContentFile(datos), save=True)
+ContenidoMateria.objects.create(materia=mat_comp, autor=prof_alfonso, publicado=False, orden=2,
+                                titulo='Unidad 4: Liderazgo (borrador)', cuerpo='<p>En preparación.</p>')
 
 print("✅ Datos de ejemplo creados exitosamente")
 print("\nUsuarios de prueba (usuario / contraseña):")

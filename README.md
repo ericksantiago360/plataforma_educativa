@@ -18,11 +18,12 @@
 - ✅ Sidebar con perfil del estudiante
 - ✅ Dashboard con estadísticas del perfil académico
 - ✅ Menús según el rol del usuario
-- ✅ 11 secciones principales:
+- ✅ 12 secciones principales:
   - 🏠 Inicio
   - 📚 Biblioteca Digital
   - 📋 Control Escolar
   - 📝 Tareas
+  - 📖 Contenido de Materias
   - 👨‍🏫 Mi Tutor
   - 🆘 Mesa de Ayuda
   - 📅 Calendario
@@ -134,6 +135,8 @@ Filtros y acciones extra:
 - `POST estudiantes/alta/` (staff) crea estudiante + cuenta (usuario = matrícula) + perfil y devuelve **una sola vez** la contraseña temporal.
 - `GET cursos/<id>/inscritos/` (profesor y staff), `POST cursos/<id>/inscribir/` y `POST cursos/<id>/quitar/` (staff) con `{estudiante}`.
 - `POST materias/<id>/inscribir_grupo/` (staff) con `{periodo}` crea el historial "cursando" de cada alumno activo del curso que aún no lo tenga.
+- `contenidos/?materia=<id>` lista el contenido de una materia. `POST contenidos/<id>/subir_archivo/` (multipart, campo `archivo`) agrega un adjunto.
+- `GET archivos-contenido/<id>/descargar/` entrega un adjunto **revisando permisos** (no hay URL pública de los archivos); `DELETE archivos-contenido/<id>/` lo quita.
 
 ---
 
@@ -152,6 +155,7 @@ Las cuentas las crea Control Escolar desde el panel de administración: primero 
 | Estudiantes, perfiles | Solo el suyo (lectura) | Alumnos de sus cursos (lectura) | Todo |
 | Cursos | Los que cursa (lectura) | Los suyos (edita, no crea ni borra) | Todo, incluida la inscripción de alumnos |
 | Materias | Las de sus cursos (lectura) | Las de sus cursos (lectura) | Todo, incluida la inscripción del grupo |
+| Contenido de materias | Lo **publicado** de sus materias activas | Crea, edita, publica y elimina en sus materias (incluye borradores y adjuntos) | Todo |
 | Tareas | Las de sus cursos (lectura) | Crea y elimina en sus cursos | Todo |
 | Clases, foros | Los de sus cursos (lectura) | Los de sus cursos (edita) | Todo |
 | Control escolar | Su historial (lectura) | Captura calificaciones de sus materias | Todo |
@@ -162,6 +166,8 @@ Las cuentas las crea Control Escolar desde el panel de administración: primero 
 | Centro de idiomas | Ve los cursos activos; se inscribe y cancela | Ve los cursos activos | Todo (incluida la lista de inscritos) |
 | Mi tutor | Sus tutores asignados | Tutores de sus alumnos | Todo |
 | Biblioteca, comunicados | Lectura (biblioteca: solo recursos activos) | Lectura | Todo |
+
+**Adjuntos permitidos en el contenido de materias:** PDF, Word, PowerPoint y Excel (hasta 25 MB); JPG, PNG, GIF y WebP (hasta 10 MB); MP4 y WebM (hasta 200 MB). El servidor valida la extensión, el tamaño y que el contenido real del archivo corresponda (un HTML renombrado a `.pdf` se rechaza). El texto del editor se sanea: solo se conservan formato, enlaces y tablas.
 
 Si un usuario pide un registro que no le corresponde, la API responde **404** (no revela que existe). El autor de mensajes y tickets siempre se toma de la sesión, nunca de lo que envía el navegador.
 
@@ -244,6 +250,19 @@ Si un usuario pide un registro que no le corresponde, la API responde **404** (n
 - activo (inactiva = no admite inscripciones)
 ```
 
+### Tabla: **ContenidoMateria** / **ArchivoContenido**
+```
+ContenidoMateria                       ArchivoContenido
+- id (PK)                              - id (PK)
+- materia (FK)                         - contenido (FK)
+- titulo                               - archivo (ruta con nombre aleatorio en media/)
+- cuerpo (HTML saneado: texto,         - nombre (original, para mostrar)
+  enlaces y tablas)                    - tipo (documento/imagen/video)
+- video_youtube (id del video)         - tamano
+- publicado (borrador = solo profesor) - subido
+- orden, autor, creado, actualizado
+```
+
 ### Tabla: **ControlEscolar** (historial académico)
 ```
 - id (PK)
@@ -315,7 +334,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 66 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`), servicios, alta de estudiantes, inscripción a cursos, tareas, materias y calificaciones.
+Son 79 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`), servicios, alta de estudiantes, inscripción a cursos, tareas, materias, calificaciones y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -332,6 +351,9 @@ docker-compose exec db mysql -uroot -proot_password \
 | `no such table` / `Unknown column` | Faltan migraciones | `docker-compose exec backend python manage.py migrate` |
 | El seed falla con `Duplicate entry` | El seed ya se había ejecutado | `docker-compose down -v` (⚠️ borra los datos) y repetir la Puesta en Marcha |
 | Los estudiantes no pueden iniciar sesión | Su registro no tiene `usuario` enlazado | Crear el usuario en el admin y enlazarlo al estudiante |
+| Un adjunto da error 413 al subirlo | Supera `client_max_body_size` de nginx (210 MB) | Usa un archivo más pequeño o un enlace de YouTube para videos largos |
+| Los adjuntos responden en blanco al abrirlos por el puerto 8000 | Con `SERVIR_ARCHIVOS_CON_NGINX=True` el archivo lo envía nginx | Entra siempre por http://localhost (puerto 80) |
+| El editor de texto aparece como un cuadro simple | No cargó TinyMCE desde el CDN (sin internet) | Revisa la conexión; mientras tanto se puede escribir texto simple |
 
 ### Reiniciar Servicios
 ```bash
@@ -373,7 +395,9 @@ plataforma-universitaria/
 │   ├── coordinacion/          # App Coordinación (tareas, comunicados)
 │   ├── perfiles/              # Perfil académico y tutores
 │   ├── servicios/             # Biblioteca, mesa de ayuda, calendario, idiomas
-│   └── academico/             # Materias, clases, foros, control escolar
+│   ├── academico/             # Materias, contenido, clases, foros, control escolar
+│   │   └── archivos.py        # Validación de adjuntos, saneamiento de HTML y YouTube
+│   └── media/                 # Adjuntos subidos (no se versiona; lo sirve nginx tras revisar permisos)
 └── frontend/
     ├── index.html             # Campus virtual (requiere sesión)
     ├── login.html             # Inicio de sesión
@@ -413,6 +437,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - ✅ **Control Escolar:** historial con calificaciones (estudiante); el profesor captura calificaciones y el perfil del alumno se recalcula solo
 - ✅ **Tareas:** el profesor crea tareas para sus cursos (se asignan a todo el grupo); el estudiante ve las suyas y cuáles están vencidas
 - ✅ **Administración (staff):** alta de estudiantes con cuenta y perfil, inscripción a cursos, materias e inscripción del grupo a una materia
+- ✅ **Contenido de Materias:** el profesor crea lecciones con texto enriquecido y **tablas** (editor TinyMCE), adjunta **PDF, Word, PowerPoint, Excel, imágenes y videos** (con barra de progreso) o un **video de YouTube**, y decide si se publican; el estudiante ve lo publicado con reproductor, galería y descargas
 - ✅ **Foro de Clase:** foros de tus cursos; publicar, editar y eliminar mensajes; los mensajes de profesores llevan etiqueta
 - ✅ **Clases en Línea:** lista de clases de Zoom
 - ✅ **Biblioteca Digital:** recursos con buscador y filtro por tipo
@@ -481,6 +506,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - **CSS3** - Estilos
 - **JavaScript ES6+** - Interactividad
 - **Fetch API** - Consumo de API
+- **TinyMCE 6** (MIT, desde CDN) - Editor de texto enriquecido con tablas
 
 ### DevOps
 - **Docker** - Contenedores
@@ -518,6 +544,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Creación de tareas por el profesor
 - [x] Captura de calificaciones con recálculo del perfil
 - [x] Materias e inscripción del grupo por periodo
+- [x] Contenido de materias con texto, tablas, adjuntos, imágenes y videos
 
 ### Pendientes 🔄
 - [ ] Entregas de tareas con archivos
@@ -549,6 +576,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 5. Usa Gunicorn en lugar de runserver
 6. No publiques los puertos 8000 (Django) ni 3306 (MySQL): todo el tráfico debe pasar por Nginx
 7. Cambia las contraseñas de MySQL de `docker-compose.yml`
+8. Respalda `backend/media/` junto con la base de datos: ahí están los adjuntos de las materias
 8. Agrega monitoreo con Sentry
 
 ---

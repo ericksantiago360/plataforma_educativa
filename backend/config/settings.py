@@ -83,6 +83,13 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = '/static/'
+
+# Adjuntos del contenido de materias. No se publican directamente: se descargan por
+# /api/archivos-contenido/<id>/descargar/, que revisa permisos. Con SERVIR_ARCHIVOS_CON_NGINX
+# Django solo autoriza y nginx envía el archivo (X-Accel-Redirect), lo que permite adelantar videos.
+MEDIA_ROOT = config('MEDIA_ROOT', default=str(BASE_DIR / 'media'))
+SERVIR_ARCHIVOS_CON_NGINX = config('SERVIR_ARCHIVOS_CON_NGINX', default=False, cast=bool)
+FILE_UPLOAD_PERMISSIONS = 0o644  # nginx (otro contenedor) necesita leerlos
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {

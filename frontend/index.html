@@ -378,6 +378,26 @@
             color: var(--gray-700);
         }
 
+        /* Contenido de materias: HTML del editor (ya saneado por el servidor) */
+        .contenido-cuerpo { line-height: 1.6; overflow-wrap: anywhere; }
+        .contenido-cuerpo h2, .contenido-cuerpo h3, .contenido-cuerpo h4 { margin: 1.25rem 0 0.5rem; }
+        .contenido-cuerpo p, .contenido-cuerpo ul, .contenido-cuerpo ol,
+        .contenido-cuerpo blockquote, .contenido-cuerpo pre { margin-bottom: 0.75rem; }
+        .contenido-cuerpo ul, .contenido-cuerpo ol { padding-left: 1.5rem; }
+        .contenido-cuerpo blockquote { border-left: 4px solid var(--accent); padding-left: 1rem; color: var(--gray-700); }
+        .contenido-cuerpo pre { background: var(--gray-100); padding: 0.75rem; border-radius: 6px; overflow-x: auto; }
+        .contenido-cuerpo a { color: var(--primary); }
+        .tabla-desplazable { overflow-x: auto; margin-bottom: 0.75rem; }
+        .contenido-cuerpo table { border-collapse: collapse; min-width: 50%; }
+        .contenido-cuerpo th, .contenido-cuerpo td { border: 1px solid var(--gray-200); padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; }
+        .contenido-cuerpo th { background: var(--gray-100); }
+        .contenido-video { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: 8px; overflow: hidden; }
+        .contenido-video iframe, .contenido-video video { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+        .contenido-galeria { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 0.75rem; }
+        .contenido-galeria img { width: 100%; height: 140px; object-fit: cover; border-radius: 8px; border: 1px solid var(--gray-200); }
+        .barra-progreso { height: 6px; background: var(--gray-200); border-radius: 3px; overflow: hidden; margin-top: 0.25rem; }
+        .barra-progreso > div { height: 100%; width: 0; background: var(--primary); transition: width 0.2s; }
+
         /* Button */
         .btn {
             padding: 0.75rem 1.5rem;
@@ -487,6 +507,10 @@
                 <a href="#" class="menu-item" onclick="showSection('tareas'); return false;">
                     <span class="menu-icon">📝</span>
                     <span>Tareas</span>
+                </a>
+                <a href="#" class="menu-item" onclick="showSection('contenido'); return false;">
+                    <span class="menu-icon">📖</span>
+                    <span>Contenido de Materias</span>
                 </a>
                 <a href="#" class="menu-item" data-roles="estudiante" onclick="showSection('tutor'); return false;">
                     <span class="menu-icon">👨‍🏫</span>
@@ -760,6 +784,12 @@
             <div id="tareas" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">📝 Tareas</h2>
                 <div id="tareas-contenido"><div class="card"><p>Cargando…</p></div></div>
+            </div>
+
+            <!-- Contenido de Materias Section -->
+            <div id="contenido" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">📖 Contenido de Materias</h2>
+                <div id="contenido-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Administración Section (solo staff) -->
