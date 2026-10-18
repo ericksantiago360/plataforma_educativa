@@ -93,6 +93,19 @@ SERVIR_ARCHIVOS_CON_NGINX = config('SERVIR_ARCHIVOS_CON_NGINX', default=False, c
 FILE_UPLOAD_PERMISSIONS = 0o644  # nginx (otro contenedor) necesita leerlos
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+# Correo para los avisos a los alumnos (notificaciones/correo.py).
+# Sin configurar, los correos se imprimen en la consola del backend; en docker-compose van a Mailpit.
+# En producción: EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend y los datos SMTP del proveedor.
+EMAIL_BACKEND = config('EMAIL_BACKEND', default='django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = config('EMAIL_HOST', default='localhost')
+EMAIL_PORT = config('EMAIL_PORT', default=25, cast=int)
+EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
+EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
+EMAIL_USE_TLS = config('EMAIL_USE_TLS', default=False, cast=bool)
+EMAIL_TIMEOUT = 10  # un servidor de correo caído no debe dejar colgada la petición
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='Campus Virtual <no-responder@campus.local>')
+URL_PLATAFORMA = config('URL_PLATAFORMA', default='http://localhost')  # para el enlace de los correos
+
 REST_FRAMEWORK = {
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 10,

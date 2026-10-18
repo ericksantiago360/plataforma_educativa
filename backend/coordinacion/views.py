@@ -13,6 +13,7 @@ from rest_framework.response import Response
 from academico.archivos import respuesta_de_descarga, validar_archivo
 from cuentas.permisos import AlcancePorRolMixin, ProfesorEscribe, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, estudiante_de, rol_de
+from notificaciones.correo import avisar_comunicado, avisar_tarea_nueva
 from .models import Tarea, EntregaTarea, ArchivoEntrega, Comunicado
 from .serializers import ArchivoEntregaSerializer, TareaSerializer, ComunicadoSerializer, datos_de_entrega
 
@@ -29,6 +30,10 @@ class TareaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
         if self.action in ('estado', 'entregar'):
             return [IsAuthenticated()]
         return super().get_permissions()
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)  # el mixin verifica que el curso sea del profesor
+        avisar_tarea_nueva(serializer.instance)
 
     def _estudiante(self):
         estudiante = estudiante_de(self.request.user)
@@ -138,3 +143,8 @@ class ComunicadoViewSet(viewsets.ModelViewSet):
         if rol == ESTUDIANTE:
             return qs.filter(Q(curso__isnull=True) | Q(curso__estudiantes=estudiante_de(user)), activo=True).distinct()
         return qs.none()
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        if serializer.instance.activo:
+            avisar_comunicado(serializer.instance)

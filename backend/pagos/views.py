@@ -8,6 +8,7 @@ from academico.reportes import respuesta_pdf
 from cuentas.permisos import SoloStaffEscribe
 from cuentas.roles import STAFF, ESTUDIANTE, estudiante_de, rol_de
 from estudiantes.models import Estudiante
+from notificaciones.correo import avisar_cargos, avisar_pago, avisar_pago_anulado
 from .models import ConceptoPago, Cargo, Pago, con_pagado
 from .recibos import datos_recibo, pdf_recibo
 from .serializers import (CargoMasivoSerializer, CargoSerializer, ConceptoPagoSerializer, CrearCargoSerializer,
@@ -68,6 +69,7 @@ class CargoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Crea
             tipo=concepto.tipo, monto=concepto.monto, periodo=datos.validated_data.get('periodo', ''),
             fecha_limite=datos.validated_data.get('fecha_limite'), creado_por=request.user,
         )
+        avisar_cargos([cargo])
         return self._respuesta(cargo, status.HTTP_201_CREATED)
 
     @action(detail=False, methods=['post'])
@@ -88,6 +90,7 @@ class CargoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Crea
             if estudiante.pk not in ya_tienen
         ]
         Cargo.objects.bulk_create(nuevos)
+        avisar_cargos(nuevos)
         return Response({'creados': len(nuevos), 'ya_tenian': len(activos) - len(nuevos)}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'])
@@ -115,6 +118,7 @@ class CargoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Crea
                 return Response({'monto': [f'El saldo pendiente es ${cargo.saldo:,.2f}.']},
                                 status=status.HTTP_400_BAD_REQUEST)
             pago = Pago.objects.create(cargo=cargo, registrado_por=request.user, **datos.validated_data)
+            avisar_pago(pago)  # sale al confirmar la transacción, con el recibo adjunto
         return self._respuesta(cargo, status.HTTP_201_CREATED, pago=PagoSerializer(pago).data)
 
     @action(detail=False, methods=['post'])
@@ -163,6 +167,7 @@ class PagoViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             pago.motivo_anulacion = motivo[:255]
             pago.anulado_por = request.user
             pago.save(update_fields=['anulado', 'motivo_anulacion', 'anulado_por'])
+            avisar_pago_anulado(pago)
         return Response(self.get_serializer(pago).data)
 
     @action(detail=True, methods=['get'])

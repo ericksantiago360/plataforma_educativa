@@ -103,6 +103,7 @@ Abre http://localhost: te llevará a la página de inicio de sesión.
 | **Login** | http://localhost/login.html | Inicio de sesión |
 | **API REST** | http://localhost/api/ | API a través de Nginx (la que usa el frontend) |
 | **Admin Django** | http://localhost:8000/admin/ | Panel administrativo |
+| **Mailpit** | http://localhost:8025 | Bandeja de prueba con los correos que envía la plataforma |
 
 > 🔒 Toda la API exige sesión. Para explorarla desde el navegador, inicia sesión primero en http://localhost:8000/admin/ y luego abre http://localhost:8000/api/estudiantes/ (la sesión se comparte en el mismo puerto).
 
@@ -151,6 +152,38 @@ Filtros y acciones extra:
 - `POST materias/<id>/inscribir_grupo/` (staff) con `{periodo}` crea el historial "cursando" de cada alumno activo del curso que aún no lo tenga.
 - `contenidos/?materia=<id>` lista el contenido de una materia. `POST contenidos/<id>/subir_archivo/` (multipart, campo `archivo`) agrega un adjunto.
 - `GET archivos-contenido/<id>/descargar/` entrega un adjunto **revisando permisos** (no hay URL pública de los archivos); `DELETE archivos-contenido/<id>/` lo quita.
+
+---
+
+## ✉️ Avisos por correo
+
+La plataforma avisa por correo a los alumnos activos (al email de su registro de Estudiante) cuando:
+
+| Evento | Destinatarios |
+|--------|---------------|
+| El profesor crea una tarea | Alumnos del curso |
+| Se captura o cambia una calificación final (aprobado/reprobado) | El alumno |
+| El staff genera un cargo (individual o masivo) | Cada alumno con el cargo |
+| Se registra un pago (con el **recibo PDF adjunto**) o se anula | El alumno |
+| El staff responde o cambia el estado de un ticket de la Mesa de Ayuda | El alumno |
+| Se publica un comunicado activo por la API | Alumnos del curso, o todos si es general |
+
+Los correos salen cuando la operación ya se guardó; si el servidor de correo falla, solo queda en el log del backend y la operación no se pierde. Lo que se hace desde el admin de Django no envía avisos.
+
+**En desarrollo** los atrapa **Mailpit**: no salen a internet y se ven en http://localhost:8025.
+
+**En producción** configura un proveedor SMTP en `backend/.env` (ver `backend/.env.example`) y quita de `docker-compose.yml` las variables `EMAIL_*` que apuntan a Mailpit:
+```
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.tu-proveedor.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=usuario
+EMAIL_HOST_PASSWORD=contraseña
+EMAIL_USE_TLS=True
+DEFAULT_FROM_EMAIL=Campus Virtual <no-responder@tu-universidad.mx>
+URL_PLATAFORMA=https://campus.tu-universidad.mx
+```
+Sin configuración, los correos se imprimen en la consola del backend.
 
 ---
 
@@ -399,7 +432,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 174 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluidos el bloqueo de estudiantes dados de baja y el cambio de contraseña), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, reportes en PDF, pagos (cargos, pagos parciales, anulaciones y recibos), perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 185 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluidos el bloqueo de estudiantes dados de baja y el cambio de contraseña), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, reportes en PDF, pagos (cargos, pagos parciales, anulaciones y recibos), avisos por correo, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -467,6 +500,7 @@ plataforma-universitaria/
 │   ├── servicios/             # Biblioteca, mesa de ayuda, calendario, idiomas
 │   ├── academico/             # Materias, contenido, clases, foros, control escolar, reportes PDF
 │   ├── pagos/                 # Conceptos, cargos, pagos y recibos
+│   ├── notificaciones/        # Avisos por correo a los alumnos
 │   │   └── archivos.py        # Validación de adjuntos, saneamiento de HTML y YouTube
 │   └── media/                 # Adjuntos subidos (no se versiona; lo sirve nginx tras revisar permisos)
 └── frontend/
@@ -543,7 +577,8 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
    - No exponer la contraseña de la clase en la API
 
 4. **Notificaciones**
-   - Email automático
+   - Envío de correos en segundo plano (cola) para grupos muy grandes
+   - Que cada alumno elija qué avisos recibir
    - Notificaciones push
    - Alertas de tareas
 
@@ -617,10 +652,10 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Permisos por rol en las clases de Zoom
 - [x] Reportes en PDF (kardex y reporte de grupo)
 - [x] Sistema de pagos (cargos, pagos en caja y recibos en PDF)
+- [x] Avisos por correo (tareas, calificaciones, cargos, pagos, mesa de ayuda, comunicados)
 
 ### Pendientes 🔄
 - [ ] Corregir integración con Zoom
-- [ ] Notificaciones por email
 - [ ] Chat en tiempo real
 - [ ] App móvil
 
@@ -672,5 +707,4 @@ Has creado exitosamente una **plataforma educativa completa** con:
 - ✅ Infraestructura escalable con Docker
 - ✅ Base de datos relacional
 - ✅ Integración completa frontend-backend
-
 **¡Felicidades! Tu plataforma está lista para ser expandida.** 🎉

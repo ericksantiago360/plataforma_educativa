@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import AlcancePorRolMixin, EstudianteAutor, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, estudiante_de, rol_de
+from notificaciones.correo import avisar_respuesta_ticket
 from pagos.models import cargar_curso_idiomas, cargo_vigente_de_idiomas
 from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
 from .serializers import BibliotecaDigitalSerializer, MesaAyudaSerializer, EventoCalendarioSerializer, CentroIdiomasSerializer
@@ -34,6 +35,13 @@ class MesaAyudaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
             raise PermissionDenied('Solo los estudiantes pueden abrir tickets.')
         # Estado y respuesta los gestiona el staff, no quien abre el ticket
         serializer.save(estudiante=estudiante, estado='abierto', respuesta='')
+
+    def perform_update(self, serializer):
+        antes = (serializer.instance.estado, serializer.instance.respuesta)
+        super().perform_update(serializer)
+        ticket = serializer.instance
+        if (ticket.estado, ticket.respuesta) != antes:
+            avisar_respuesta_ticket(ticket)
 
 class EventoCalendarioViewSet(viewsets.ModelViewSet):
     queryset = EventoCalendario.objects.all()

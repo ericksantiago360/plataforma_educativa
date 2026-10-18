@@ -11,6 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import ACCIONES_ESCRITURA, AlcancePorRolMixin, AutorDelMensaje, ProfesorEscribe, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, es_profesor, estudiante_de, rol_de
+from notificaciones.correo import avisar_calificacion
 from .archivos import respuesta_de_descarga, validar_archivo
 from .reportes import datos_reporte_grupo, pdf_reporte_grupo, respuesta_pdf
 from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar, ContenidoMateria, ArchivoContenido
@@ -122,10 +123,16 @@ class ControlEscolarViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         super().perform_create(serializer)
         self._recalcular_perfil(serializer.instance.estudiante)
+        avisar_calificacion(serializer.instance)
 
     def perform_update(self, serializer):
+        antes = (serializer.instance.estado, serializer.instance.calificacion)
         super().perform_update(serializer)
-        self._recalcular_perfil(serializer.instance.estudiante)
+        registro = serializer.instance
+        self._recalcular_perfil(registro.estudiante)
+        # Se avisa solo si cambió lo que ve el alumno (no al guardar sin cambios)
+        if (registro.estado, registro.calificacion) != antes:
+            avisar_calificacion(registro)
 
     def perform_destroy(self, instance):
         estudiante = instance.estudiante

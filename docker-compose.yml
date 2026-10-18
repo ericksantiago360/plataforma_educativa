@@ -39,9 +39,15 @@ services:
       - DB_HOST=db
       - DB_PORT=3306
       - SERVIR_ARCHIVOS_CON_NGINX=True
+      # Avisos por correo: en desarrollo los atrapa Mailpit (ver http://localhost:8025)
+      - EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+      - EMAIL_HOST=mailpit
+      - EMAIL_PORT=1025
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     networks:
       - plataforma_network
 
@@ -56,6 +62,15 @@ services:
       - "80:80"
     depends_on:
       - backend
+    networks:
+      - plataforma_network
+
+  # Servidor de correo de prueba: recibe los avisos sin enviarlos a internet y los muestra en una página web
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    container_name: plataforma_mailpit
+    ports:
+      - "8025:8025"   # bandeja web
     networks:
       - plataforma_network
 
