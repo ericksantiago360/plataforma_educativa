@@ -43,10 +43,14 @@ services:
       - EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
       - EMAIL_HOST=mailpit
       - EMAIL_PORT=1025
+      # Chat en tiempo real: Redis reparte los mensajes entre las conexiones WebSocket
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
       mailpit:
+        condition: service_started
+      redis:
         condition: service_started
     networks:
       - plataforma_network
@@ -62,6 +66,13 @@ services:
       - "80:80"
     depends_on:
       - backend
+    networks:
+      - plataforma_network
+
+  # Capa de mensajes del chat (Django Channels)
+  redis:
+    image: redis:7.4.9-alpine
+    container_name: plataforma_redis
     networks:
       - plataforma_network
 

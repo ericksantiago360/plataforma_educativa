@@ -537,6 +537,12 @@
                     <span class="menu-icon">💬</span>
                     <span>Foro de Clase</span>
                 </a>
+                <a href="#" class="menu-item" data-roles="estudiante,profesor,staff" onclick="showSection('chat'); return false;">
+                    <span class="menu-icon">💬</span>
+                    <span>Chat</span>
+                    <span id="chat-badge" hidden
+                          style="margin-left: auto; background: var(--danger); color: white; border-radius: 999px; padding: 0 0.5rem; font-size: 0.75rem;"></span>
+                </a>
                 <a href="#" class="menu-item" data-roles="estudiante,staff" onclick="showSection('pagos'); return false;">
                     <span class="menu-icon">💳</span>
                     <span>Pagos</span>
@@ -760,6 +766,12 @@
             <div id="contenido" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">📖 Contenido de Materias</h2>
                 <div id="contenido-contenido"><div class="card"><p>Cargando…</p></div></div>
+            </div>
+
+            <!-- Chat Section: salas de curso y conversaciones privadas en tiempo real -->
+            <div id="chat" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">💬 Chat</h2>
+                <div id="chat-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Pagos Section (estudiante: su estado de cuenta; staff: caja) -->

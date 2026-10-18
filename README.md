@@ -130,6 +130,7 @@ Las peticiones `POST`, `PUT`, `PATCH` y `DELETE` deben enviar el header `X-CSRFT
 | servicios | `biblioteca/`, `mesa-ayuda/`, `calendario/`, `idiomas/` |
 | academico | `materias/`, `clases/`, `foros/`, `mensajes-foro/`, `control-escolar/` |
 | pagos | `conceptos-pago/`, `cargos/`, `pagos/` |
+| chat | `chat/conversaciones/`, `chat/contactos/` (los mensajes van por WebSocket en `/ws/chat/`) |
 
 Filtros y acciones extra:
 - `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
@@ -152,6 +153,20 @@ Filtros y acciones extra:
 - `POST materias/<id>/inscribir_grupo/` (staff) con `{periodo}` crea el historial "cursando" de cada alumno activo del curso que aún no lo tenga.
 - `contenidos/?materia=<id>` lista el contenido de una materia. `POST contenidos/<id>/subir_archivo/` (multipart, campo `archivo`) agrega un adjunto.
 - `GET archivos-contenido/<id>/descargar/` entrega un adjunto **revisando permisos** (no hay URL pública de los archivos); `DELETE archivos-contenido/<id>/` lo quita.
+
+---
+
+## 💬 Chat en tiempo real
+
+- **Sala de cada curso:** el profesor titular y los alumnos activos inscritos (si alguien deja el curso, deja de verla).
+- **Privados:** alumno ↔ profesor de alguno de sus cursos, y alumno ↔ Control Escolar (staff).
+- Los mensajes llegan al instante por WebSocket (Django Channels; Redis los reparte entre conexiones) y quedan guardados; el menú muestra los no leídos.
+- La conexión usa la misma sesión que la API y solo acepta el origen de la plataforma. Un estudiante dado de baja no puede conectarse ni escribir (se revisa en cada mensaje). Máximo 2000 caracteres por mensaje y 10 mensajes cada 10 segundos.
+
+API:
+- `GET chat/conversaciones/` mis conversaciones con último mensaje y no leídos; `GET chat/conversaciones/<id>/mensajes/?antes=<id>` historial de 50 en 50; `POST chat/conversaciones/<id>/leer/` marca como leída.
+- `GET chat/contactos/` con quién puedo abrir un privado; `POST chat/conversaciones/privada/` con `{usuario}` lo abre (o devuelve el existente).
+- WebSocket `ws://localhost/ws/chat/`: el cliente envía `{"tipo": "mensaje", "conversacion": <id>, "texto": "..."}` y recibe `{"tipo": "mensaje", "mensaje": {...}}`, `{"tipo": "conversacion_nueva", ...}` o `{"tipo": "error", "detalle": "..."}`.
 
 ---
 
@@ -432,7 +447,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 185 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluidos el bloqueo de estudiantes dados de baja y el cambio de contraseña), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, reportes en PDF, pagos (cargos, pagos parciales, anulaciones y recibos), avisos por correo, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 199 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluidos el bloqueo de estudiantes dados de baja y el cambio de contraseña), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, reportes en PDF, pagos (cargos, pagos parciales, anulaciones y recibos), avisos por correo, chat (incluidas conexiones WebSocket reales), perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -449,6 +464,7 @@ docker-compose exec db mysql -uroot -proot_password \
 | `no such table` / `Unknown column` | Faltan migraciones | `docker-compose exec backend python manage.py migrate` |
 | El seed falla con `Duplicate entry` | El seed ya se había ejecutado | `docker-compose down -v` (⚠️ borra los datos) y repetir la Puesta en Marcha |
 | Los estudiantes no pueden iniciar sesión | Su registro no tiene `usuario` enlazado | Crear el usuario en el admin y enlazarlo al estudiante |
+| El chat dice "Reconectando…" todo el tiempo | Falta Redis o nginx no tiene la ruta `/ws/` (configuración vieja) | `docker-compose up -d` y `docker-compose restart frontend` |
 | Un adjunto da error 413 al subirlo | Supera `client_max_body_size` de nginx (210 MB) | Usa un archivo más pequeño o un enlace de YouTube para videos largos |
 | Los adjuntos responden en blanco al abrirlos por el puerto 8000 | Con `SERVIR_ARCHIVOS_CON_NGINX=True` el archivo lo envía nginx | Entra siempre por http://localhost (puerto 80) |
 | El editor de texto aparece como un cuadro simple | No cargó TinyMCE desde el CDN (sin internet) | Revisa la conexión; mientras tanto se puede escribir texto simple |
@@ -501,6 +517,7 @@ plataforma-universitaria/
 │   ├── academico/             # Materias, contenido, clases, foros, control escolar, reportes PDF
 │   ├── pagos/                 # Conceptos, cargos, pagos y recibos
 │   ├── notificaciones/        # Avisos por correo a los alumnos
+│   ├── chat/                  # Chat en tiempo real (modelos, API y consumidor WebSocket)
 │   │   └── archivos.py        # Validación de adjuntos, saneamiento de HTML y YouTube
 │   └── media/                 # Adjuntos subidos (no se versiona; lo sirve nginx tras revisar permisos)
 └── frontend/
@@ -587,7 +604,6 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
    - Certificados digitales
 
 ### Funcionalidades Secundarias
-- Chat en tiempo real (WebSockets)
 - Pago en línea (Stripe o Mercado Pago) sobre el registro interno de pagos
 - App móvil (React Native)
 - Módulo de asistencia
@@ -653,12 +669,11 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Reportes en PDF (kardex y reporte de grupo)
 - [x] Sistema de pagos (cargos, pagos en caja y recibos en PDF)
 - [x] Avisos por correo (tareas, calificaciones, cargos, pagos, mesa de ayuda, comunicados)
+- [x] Chat en tiempo real (salas de curso y privados)
 
 ### Pendientes 🔄
 - [ ] Corregir integración con Zoom
-- [ ] Chat en tiempo real
 - [ ] App móvil
-
 ---
 
 ## 💡 Consejos de Uso

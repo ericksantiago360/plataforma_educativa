@@ -52,6 +52,12 @@ async function init() {
     updatePerfil(perfil);
     updateBanner(perfil, eventos);
     updateDashboard(usuario);
+
+    // El chat se conecta desde el inicio para mostrar los no leídos en el menú
+    if (usuario.rol) {
+        cargarConversaciones().catch(error => console.error('Error cargando el chat:', error));
+        conectarChat();
+    }
 }
 
 async function loadProximosEventos() {
@@ -223,6 +229,9 @@ function showSection(sectionId) {
             break;
         case 'pagos':
             loadPagos();
+            break;
+        case 'chat':
+            loadChat();
             break;
     }
 }
@@ -2435,6 +2444,326 @@ async function quitarAdjunto(contenido, archivoId) {
     };
     await editarContenido(borrador);
 }
+
+// ---------- Chat ----------
+// Una conexión WebSocket por pestaña (/ws/chat/) recibe los mensajes de todas las conversaciones;
+// el historial y la lista se piden por la API. Si la conexión se corta, se reintenta con espera creciente.
+
+const chat = {
+    conversaciones: [],
+    contactos: [],
+    actual: null,          // id de la conversación abierta
+    mensajes: [],          // mensajes de la conversación abierta
+    hayMas: false,
+    socket: null,
+    espera: 1000,
+    conectado: false,
+};
+const ROLES_CHAT = { profesor: 'Profesor', staff: 'Control Escolar' };
+
+function chatVisible() {
+    const seccion = document.getElementById('chat');
+    return Boolean(seccion && seccion.classList.contains('active') && !document.hidden);
+}
+
+function conectarChat() {
+    const protocolo = location.protocol === 'https:' ? 'wss' : 'ws';
+    const socket = new WebSocket(`${protocolo}://${location.host}/ws/chat/`);
+    chat.socket = socket;
+
+    socket.addEventListener('open', () => {
+        chat.conectado = true;
+        chat.espera = 1000;
+        actualizarEstadoChat();
+    });
+    socket.addEventListener('message', evento => {
+        let datos;
+        try { datos = JSON.parse(evento.data); } catch { return; }
+        if (datos.tipo === 'mensaje') recibirMensajeChat(datos.mensaje);
+        else if (datos.tipo === 'conversacion_nueva') cargarConversaciones().then(renderListaChat);
+        else if (datos.tipo === 'error') mostrarErrorChat(datos.detalle);
+    });
+    socket.addEventListener('close', async () => {
+        chat.conectado = false;
+        actualizarEstadoChat();
+        // Si la sesión ya no sirve (cerró sesión, se dio de baja), al login; si no, reintentar
+        const sesion = await api('/auth/me/').catch(() => null);
+        if (sesion && sesion.status === 403) {
+            window.location.replace('login.html');
+            return;
+        }
+        setTimeout(conectarChat, chat.espera);
+        chat.espera = Math.min(chat.espera * 2, 30000);
+    });
+}
+
+async function cargarConversaciones() {
+    chat.conversaciones = await getLista('/chat/conversaciones/');
+    actualizarBadgeChat();
+}
+
+function actualizarBadgeChat() {
+    const badge = document.getElementById('chat-badge');
+    if (!badge) return;
+    const total = chat.conversaciones.reduce((suma, c) => suma + c.no_leidos, 0);
+    badge.textContent = total > 99 ? '99+' : String(total);
+    badge.hidden = total === 0;
+}
+
+async function loadChat() {
+    const container = document.getElementById('chat-contenido');
+    if (!container) return;
+    if (!document.getElementById('chat-lista')) {
+        container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+    }
+    try {
+        const [, contactos] = await Promise.all([cargarConversaciones(), getLista('/chat/contactos/')]);
+        chat.contactos = contactos;
+    } catch (error) {
+        console.error('Error cargando el chat:', error);
+        errorDeCarga(container, 'el chat');
+        return;
+    }
+
+    container.innerHTML = `
+        <div class="card" style="display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; min-height: 60vh;">
+            <div style="flex: 1 1 240px; max-width: 100%; display: flex; flex-direction: column; gap: 0.75rem;">
+                ${chat.contactos.length ? `
+                <form id="chat-nueva" style="display: flex; gap: 0.5rem;">
+                    <select id="chat-contacto" aria-label="Nueva conversación privada" style="${ESTILO_CAMPO} flex: 1; min-width: 0;">
+                        ${chat.contactos.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.nombre)}${ROLES_CHAT[c.rol] ? ` (${ROLES_CHAT[c.rol]})` : ''}</option>`).join('')}
+                    </select>
+                    <button type="submit" class="btn btn-primary" title="Abrir conversación privada">Escribir</button>
+                </form>` : ''}
+                <div id="chat-lista" style="overflow-y: auto; max-height: 60vh;"></div>
+            </div>
+            <div id="chat-panel" style="flex: 3 1 360px; max-width: 100%; display: flex; flex-direction: column; min-height: 50vh;
+                                        border-left: 1px solid var(--gray-200); padding-left: 1rem;"></div>
+        </div>
+    `;
+    document.getElementById('chat-nueva')?.addEventListener('submit', abrirPrivada);
+    renderListaChat();
+
+    const abierta = chat.conversaciones.find(c => c.id === chat.actual) || chat.conversaciones[0];
+    if (abierta) abrirConversacion(abierta.id);
+    else renderPanelChat();
+}
+
+function renderListaChat() {
+    const lista = document.getElementById('chat-lista');
+    if (!lista) return;
+    if (chat.conversaciones.length === 0) {
+        lista.innerHTML = '<p style="font-size: 0.9rem; color: var(--gray-700);">Aún no tienes conversaciones.</p>';
+        return;
+    }
+    lista.innerHTML = chat.conversaciones.map(c => `
+        <button type="button" class="chat-conversacion" data-id="${escapeHtml(c.id)}"
+                style="display: block; width: 100%; text-align: left; border: none; border-radius: 8px; padding: 0.6rem 0.75rem;
+                       margin-bottom: 0.25rem; cursor: pointer; font: inherit;
+                       background: ${c.id === chat.actual ? 'var(--gray-100)' : 'transparent'};">
+            <div style="display: flex; justify-content: space-between; gap: 0.5rem;">
+                <strong style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    ${c.tipo === 'curso' ? '👥' : '👤'} ${escapeHtml(c.titulo)}</strong>
+                ${c.no_leidos ? `<span style="background: var(--danger); color: white; border-radius: 999px; padding: 0 0.45rem;
+                                             font-size: 0.75rem; align-self: center;">${escapeHtml(c.no_leidos)}</span>` : ''}
+            </div>
+            <div style="font-size: 0.8rem; color: var(--gray-700); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${c.ultimo ? `${escapeHtml(c.ultimo.autor_nombre)}: ${escapeHtml(c.ultimo.texto)}` : escapeHtml(c.subtitulo)}
+            </div>
+        </button>
+    `).join('');
+    lista.querySelectorAll('.chat-conversacion').forEach(boton => {
+        boton.addEventListener('click', () => abrirConversacion(Number(boton.dataset.id)));
+    });
+}
+
+async function abrirConversacion(id) {
+    chat.actual = id;
+    chat.mensajes = [];
+    renderListaChat();
+    renderPanelChat(true);
+    try {
+        const respuesta = await getLista(`/chat/conversaciones/${encodeURIComponent(id)}/mensajes/`);
+        if (chat.actual !== id) return;  // cambió de conversación mientras cargaba
+        chat.mensajes = respuesta.mensajes;
+        chat.hayMas = respuesta.hay_mas;
+    } catch (error) {
+        console.error('Error cargando mensajes:', error);
+        mostrarErrorChat('No se pudieron cargar los mensajes.');
+        return;
+    }
+    renderPanelChat();
+    marcarLeidoChat();
+}
+
+function renderPanelChat(cargando = false) {
+    const panel = document.getElementById('chat-panel');
+    if (!panel) return;
+    const conversacion = chat.conversaciones.find(c => c.id === chat.actual);
+    if (!conversacion) {
+        panel.innerHTML = `<p style="margin: auto; color: var(--gray-700);">
+            ${chat.contactos.length ? 'Elige una conversación o escribe a alguien.' : 'Aún no tienes conversaciones.'}</p>`;
+        return;
+    }
+    panel.innerHTML = `
+        <div style="border-bottom: 1px solid var(--gray-200); padding-bottom: 0.5rem; margin-bottom: 0.5rem;">
+            <strong>${escapeHtml(conversacion.titulo)}</strong>
+            <span style="font-size: 0.8rem; color: var(--gray-700);"> · ${escapeHtml(conversacion.subtitulo)}</span>
+            <span id="chat-estado" style="float: right; font-size: 0.75rem;"></span>
+        </div>
+        <div id="chat-mensajes" style="flex: 1; overflow-y: auto; max-height: 52vh; padding-right: 0.25rem;">
+            ${cargando ? '<p>Cargando…</p>' : ''}
+            ${chat.hayMas ? '<button type="button" id="chat-anteriores" style="' + ESTILO_ACCION + ' display: block; margin: 0 auto 0.75rem;">Ver mensajes anteriores</button>' : ''}
+            ${chat.mensajes.map(htmlMensajeChat).join('')}
+            ${!cargando && chat.mensajes.length === 0 ? '<p style="color: var(--gray-700); text-align: center;">Aún no hay mensajes. ¡Escribe el primero!</p>' : ''}
+        </div>
+        <p id="chat-error" role="alert" style="color: var(--danger); font-size: 0.85rem; min-height: 1.2em;"></p>
+        <form id="chat-form" style="display: flex; gap: 0.5rem; align-items: flex-end;">
+            <textarea id="chat-texto" rows="2" maxlength="2000" placeholder="Escribe un mensaje… (Enter envía, Shift+Enter cambia de línea)"
+                      aria-label="Mensaje" style="${ESTILO_CAMPO} flex: 1; resize: vertical;"></textarea>
+            <button type="submit" class="btn btn-primary">Enviar</button>
+        </form>
+    `;
+    const texto = document.getElementById('chat-texto');
+    document.getElementById('chat-form').addEventListener('submit', evento => { evento.preventDefault(); enviarMensajeChat(); });
+    texto.addEventListener('keydown', evento => {
+        if (evento.key === 'Enter' && !evento.shiftKey) {
+            evento.preventDefault();
+            enviarMensajeChat();
+        }
+    });
+    document.getElementById('chat-anteriores')?.addEventListener('click', cargarAnterioresChat);
+    actualizarEstadoChat();
+    bajarAlFinalChat();
+    texto.focus();
+}
+
+function htmlMensajeChat(mensaje) {
+    const propio = mensaje.autor === usuarioActual.id;
+    const hora = new Date(mensaje.enviado).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' });
+    const rol = ROLES_CHAT[mensaje.autor_rol];
+    return `
+        <div style="display: flex; justify-content: ${propio ? 'flex-end' : 'flex-start'}; margin-bottom: 0.5rem;">
+            <div style="max-width: 75%; padding: 0.5rem 0.75rem; border-radius: 12px;
+                        background: ${propio ? 'var(--primary)' : 'var(--gray-100)'}; color: ${propio ? 'white' : 'inherit'};">
+                ${propio ? '' : `<div style="font-size: 0.75rem; font-weight: 600;">${escapeHtml(mensaje.autor_nombre)}${rol ? ` · ${rol}` : ''}</div>`}
+                <div style="white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(mensaje.texto)}</div>
+                <div style="font-size: 0.7rem; opacity: 0.75; text-align: right;">${escapeHtml(hora)}</div>
+            </div>
+        </div>
+    `;
+}
+
+function bajarAlFinalChat() {
+    const contenedor = document.getElementById('chat-mensajes');
+    if (contenedor) contenedor.scrollTop = contenedor.scrollHeight;
+}
+
+function actualizarEstadoChat() {
+    const estado = document.getElementById('chat-estado');
+    if (!estado) return;
+    estado.textContent = chat.conectado ? '● En línea' : '○ Reconectando…';
+    estado.style.color = chat.conectado ? 'var(--success)' : 'var(--gray-700)';
+}
+
+function mostrarErrorChat(texto) {
+    const error = document.getElementById('chat-error');
+    if (error) error.textContent = texto;
+}
+
+function enviarMensajeChat() {
+    const campo = document.getElementById('chat-texto');
+    const texto = campo.value.trim();
+    if (!texto || !chat.actual) return;
+    if (!chat.conectado) {
+        mostrarErrorChat('Sin conexión con el chat; reintentando. Tu mensaje sigue en el cuadro de texto.');
+        return;
+    }
+    chat.socket.send(JSON.stringify({ tipo: 'mensaje', conversacion: chat.actual, texto }));
+    campo.value = '';
+    mostrarErrorChat('');
+}
+
+function recibirMensajeChat(mensaje) {
+    const conversacion = chat.conversaciones.find(c => c.id === mensaje.conversacion);
+    if (!conversacion) {
+        cargarConversaciones().then(renderListaChat);
+        return;
+    }
+    conversacion.ultimo = mensaje;
+    // La conversación con actividad sube al principio de la lista
+    chat.conversaciones = [conversacion, ...chat.conversaciones.filter(c => c !== conversacion)];
+
+    const abierta = mensaje.conversacion === chat.actual && chatVisible();
+    if (abierta) {
+        chat.mensajes.push(mensaje);
+        const contenedor = document.getElementById('chat-mensajes');
+        if (contenedor) {
+            contenedor.querySelector('p')?.remove();  // quita "Aún no hay mensajes"
+            contenedor.insertAdjacentHTML('beforeend', htmlMensajeChat(mensaje));
+            bajarAlFinalChat();
+        }
+        marcarLeidoChat();
+    } else if (mensaje.autor !== usuarioActual.id) {
+        conversacion.no_leidos += 1;
+    }
+    actualizarBadgeChat();
+    renderListaChat();
+}
+
+let leyendoChat = null;
+function marcarLeidoChat() {
+    const conversacion = chat.conversaciones.find(c => c.id === chat.actual);
+    if (conversacion) conversacion.no_leidos = 0;
+    actualizarBadgeChat();
+    renderListaChat();
+    // Agrupa las marcas de leído si llegan varios mensajes seguidos
+    clearTimeout(leyendoChat);
+    const id = chat.actual;
+    leyendoChat = setTimeout(() => api(`/chat/conversaciones/${encodeURIComponent(id)}/leer/`, { method: 'POST' }).catch(() => {}), 500);
+}
+
+async function cargarAnterioresChat() {
+    const contenedor = document.getElementById('chat-mensajes');
+    const alturaAntes = contenedor.scrollHeight;
+    const id = chat.actual;
+    try {
+        const respuesta = await getLista(`/chat/conversaciones/${encodeURIComponent(id)}/mensajes/?antes=${encodeURIComponent(chat.mensajes[0].id)}`);
+        if (chat.actual !== id) return;
+        chat.mensajes = [...respuesta.mensajes, ...chat.mensajes];
+        chat.hayMas = respuesta.hay_mas;
+    } catch {
+        mostrarErrorChat('No se pudieron cargar los mensajes anteriores.');
+        return;
+    }
+    renderPanelChat();
+    // Conserva la posición de lectura en lugar de saltar al final
+    const nuevo = document.getElementById('chat-mensajes');
+    nuevo.scrollTop = nuevo.scrollHeight - alturaAntes;
+}
+
+async function abrirPrivada(evento) {
+    evento.preventDefault();
+    const usuario = document.getElementById('chat-contacto').value;
+    try {
+        const respuesta = await api('/chat/conversaciones/privada/', { method: 'POST', body: JSON.stringify({ usuario }) });
+        const datos = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok) {
+            alert(mensajeDeError(datos, 'No se pudo abrir la conversación.'));
+            return;
+        }
+        await cargarConversaciones();
+        renderListaChat();
+        abrirConversacion(datos.id);
+    } catch {
+        alert('No hay conexión con el servidor.');
+    }
+}
+
+// Al volver a la pestaña con el chat abierto, lo que llegó mientras tanto queda leído
+document.addEventListener('visibilitychange', () => {
+    if (chatVisible() && chat.actual) marcarLeidoChat();
+});
 
 // ---------- Pagos ----------
 // El alumno ve su estado de cuenta, solicita trámites y descarga recibos.

@@ -11,6 +11,7 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1', cast=lambda v: [h.strip() for h in v.split(',')])
 
 INSTALLED_APPS = [
+    'daphne',  # primero: hace que runserver sirva ASGI (HTTP + WebSocket del chat)
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -27,6 +28,7 @@ INSTALLED_APPS = [
     'academico',
     'cuentas',
     'pagos',
+    'chat',
 ]
 
 MIDDLEWARE = [
@@ -59,6 +61,15 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+# Chat en tiempo real: con REDIS_URL los mensajes se reparten por Redis (necesario con varios procesos);
+# sin él, en memoria (sirve para un solo proceso y para las pruebas)
+REDIS_URL = config('REDIS_URL', default='')
+CHANNEL_LAYERS = {
+    'default': {'BACKEND': 'channels_redis.core.RedisChannelLayer', 'CONFIG': {'hosts': [REDIS_URL]}}
+    if REDIS_URL else {'BACKEND': 'channels.layers.InMemoryChannelLayer'}
+}
 
 DATABASES = {
     'default': {
