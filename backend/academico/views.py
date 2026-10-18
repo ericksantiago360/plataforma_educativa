@@ -3,6 +3,7 @@ import re
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.http import FileResponse, HttpResponse
 from django.utils.http import content_disposition_header
 from rest_framework import mixins, status, viewsets
@@ -155,21 +156,24 @@ class ContenidoMateriaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
         archivo = request.FILES.get('archivo')
         if archivo is None:
             return Response({'archivo': ['Adjunta un archivo.']}, status=status.HTTP_400_BAD_REQUEST)
-        if contenido.archivos.count() >= MAXIMO_ARCHIVOS_POR_CONTENIDO:
-            return Response({'archivo': [f'Máximo {MAXIMO_ARCHIVOS_POR_CONTENIDO} archivos por contenido.']},
-                            status=status.HTTP_400_BAD_REQUEST)
         try:
             tipo = validar_archivo(archivo)
         except DjangoValidationError as error:
             return Response({'archivo': error.messages}, status=status.HTTP_400_BAD_REQUEST)
 
-        nuevo = ArchivoContenido.objects.create(
-            contenido=contenido,
-            archivo=archivo,
-            nombre=os.path.basename(archivo.name)[:255],
-            tipo=tipo,
-            tamano=archivo.size,
-        )
+        with transaction.atomic():
+            # Bloquea el contenido para que dos subidas simultáneas no rebasen el máximo de archivos
+            ContenidoMateria.objects.select_for_update().get(pk=contenido.pk)
+            if contenido.archivos.count() >= MAXIMO_ARCHIVOS_POR_CONTENIDO:
+                return Response({'archivo': [f'Máximo {MAXIMO_ARCHIVOS_POR_CONTENIDO} archivos por contenido.']},
+                                status=status.HTTP_400_BAD_REQUEST)
+            nuevo = ArchivoContenido.objects.create(
+                contenido=contenido,
+                archivo=archivo,
+                nombre=os.path.basename(archivo.name)[:255],
+                tipo=tipo,
+                tamano=archivo.size,
+            )
         return Response(ArchivoContenidoSerializer(nuevo).data, status=status.HTTP_201_CREATED)
 
 class ArchivoContenidoViewSet(AlcancePorRolMixin, mixins.RetrieveModelMixin, mixins.DestroyModelMixin,

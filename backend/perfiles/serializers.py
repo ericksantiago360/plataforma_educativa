@@ -10,6 +10,8 @@ class PerfilEstudianteSerializer(serializers.ModelSerializer):
     class Meta:
         model = PerfilEstudiante
         fields = '__all__'
+        # Se calculan del historial (PerfilEstudiante.recalcular): editarlos a mano se perdería en la siguiente calificación
+        read_only_fields = ['materias_cursadas', 'promedio', 'progreso_academico']
 
 class TutorSerializer(serializers.ModelSerializer):
     class Meta:

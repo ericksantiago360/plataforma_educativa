@@ -254,6 +254,17 @@ class AdjuntosTests(ContenidoBase):
         self.assertEqual(r.status_code, 400)
         self.assertIn('máximo', r.data['archivo'][0])
 
+    def test_maximo_de_archivos_por_contenido(self):
+        contenido = self.crear()
+        self.client.force_authenticate(self.profe)
+        with mock.patch('academico.views.MAXIMO_ARCHIVOS_POR_CONTENIDO', 2):
+            self.assertEqual(self.subir(contenido, 'a.pdf', PDF).status_code, 201)
+            self.assertEqual(self.subir(contenido, 'b.pdf', PDF).status_code, 201)
+            r = self.subir(contenido, 'c.pdf', PDF)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('Máximo 2', r.data['archivo'][0])
+        self.assertEqual(contenido.archivos.count(), 2)
+
     def test_estudiante_y_otro_profesor_no_suben(self):
         contenido = self.crear()
         self.client.force_authenticate(self.u_ana)
@@ -261,6 +272,8 @@ class AdjuntosTests(ContenidoBase):
         self.client.force_authenticate(self.otro_profe)
         self.assertEqual(self.subir(contenido, 'a.pdf', PDF).status_code, 404)
 
+    # Fijo: el .env local puede activar nginx, y aquí se prueba la entrega directa desde Django
+    @override_settings(SERVIR_ARCHIVOS_CON_NGINX=False)
     def test_descarga_protegida(self):
         contenido = self.crear()
         self.client.force_authenticate(self.profe)

@@ -344,7 +344,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 109 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas y avance por alumno, comunicados, materias, calificaciones y promedio, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 112 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas y avance por alumno, comunicados, materias, calificaciones y promedio, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
