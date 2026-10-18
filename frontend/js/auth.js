@@ -31,7 +31,14 @@ async function cerrarSesion() {
 
 // Llamar al cargar una página protegida: si no hay sesión, manda al login.
 async function verificarSesion() {
-    const respuesta = await api('/auth/me/');
+    let respuesta;
+    try {
+        respuesta = await api('/auth/me/');
+    } catch {
+        // Sin red o servidor caído: en lugar de dejar la página en blanco, la pantalla "Sin conexión"
+        window.location.replace('offline.html');
+        return null;
+    }
     if (!respuesta.ok) {
         window.location.replace('login.html');
         return null;

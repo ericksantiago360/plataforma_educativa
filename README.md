@@ -156,6 +156,22 @@ Filtros y acciones extra:
 
 ---
 
+## 📱 App móvil (PWA)
+
+El campus se adapta al celular (menú lateral deslizable con ☰, encabezado compacto) y se puede **instalar como app**, con ícono propio y en pantalla completa, sin tiendas:
+
+- **Android (Chrome):** menú ☰ → "📲 Instalar app", o el aviso de instalación del navegador.
+- **iPhone / iPad (Safari):** botón Compartir → "Agregar a pantalla de inicio" (la opción "Instalar app" del menú lo explica).
+
+Cómo está hecho:
+- `frontend/manifest.webmanifest`: nombre, colores, íconos (`frontend/icons/`) y accesos directos a Tareas, Chat y Pagos (`index.html#tareas`, `#chat`, `#pagos`).
+- `frontend/sw.js` (service worker): pide todo primero a la red, así cada actualización llega de inmediato. **Nunca guarda la API ni el chat** en el teléfono; sin conexión muestra `offline.html`.
+- `frontend/js/pwa.js`: registra el service worker y muestra "Instalar app".
+
+> ⚠️ En producción la app instalable requiere **HTTPS** (los navegadores solo permiten service workers en `https://` o en `localhost`). Si cambias la lista de archivos de `sw.js`, sube su `VERSION` para que se borre la caché anterior.
+
+---
+
 ## 💬 Chat en tiempo real
 
 - **Sala de cada curso:** el profesor titular y los alumnos activos inscritos (si alguien deja el curso, deja de verla).
@@ -523,11 +539,17 @@ plataforma-universitaria/
 └── frontend/
     ├── index.html             # Campus virtual (requiere sesión)
     ├── login.html             # Inicio de sesión
+    ├── cambiar-password.html  # Cambio de contraseña
+    ├── offline.html           # Pantalla "Sin conexión" de la app
+    ├── manifest.webmanifest   # Datos de la app instalable
+    ├── sw.js                  # Service worker (app instalable)
+    ├── icons/                 # Íconos de la app
     ├── zoom-config.html       # Unirse a una clase de Zoom
     ├── css/
     │   └── styles.css
     └── js/
         ├── auth.js            # Sesión, CSRF y menús por rol
+        ├── pwa.js             # Registro del service worker y "Instalar app"
         └── app.js             # Lógica del campus virtual
 ```
 
@@ -605,7 +627,8 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 
 ### Funcionalidades Secundarias
 - Pago en línea (Stripe o Mercado Pago) sobre el registro interno de pagos
-- App móvil (React Native)
+- App en tiendas (Play Store / App Store) empaquetando la PWA con Capacitor
+- Notificaciones push en el celular
 - Módulo de asistencia
 - Gamificación (logros, badges)
 
@@ -670,10 +693,10 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Sistema de pagos (cargos, pagos en caja y recibos en PDF)
 - [x] Avisos por correo (tareas, calificaciones, cargos, pagos, mesa de ayuda, comunicados)
 - [x] Chat en tiempo real (salas de curso y privados)
+- [x] App móvil instalable (PWA) y diseño para celular
 
 ### Pendientes 🔄
 - [ ] Corregir integración con Zoom
-- [ ] App móvil
 ---
 
 ## 💡 Consejos de Uso

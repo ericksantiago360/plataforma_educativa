@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#2563eb">
+    <title>Sin conexión - Campus Virtual</title>
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .tarjeta {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            padding: 2.5rem 2rem;
+            max-width: 380px;
+            text-align: center;
+        }
+        img { width: 72px; height: 72px; margin-bottom: 1rem; }
+        h1 { font-size: 1.3rem; color: #111827; margin-bottom: 0.5rem; }
+        p { color: #374151; font-size: 0.95rem; margin-bottom: 1.5rem; }
+        button {
+            width: 100%;
+            padding: 0.85rem;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="tarjeta">
+        <img src="/icons/icon-192.png" alt="">
+        <h1>Sin conexión</h1>
+        <p>El campus necesita internet para mostrar tus clases, tareas y mensajes. Revisa tu conexión e inténtalo de nuevo.</p>
+        <button type="button" onclick="volver()">Reintentar</button>
+    </div>
+    <script>
+        // Se vuelve al campus (esta página también se muestra cuando la API no responde)
+        function volver() {
+            window.location.replace('index.html');
+        }
+        window.addEventListener('online', volver);
+    </script>
+</body>
+</html>

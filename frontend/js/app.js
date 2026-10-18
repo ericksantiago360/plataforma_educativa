@@ -58,6 +58,10 @@ async function init() {
         cargarConversaciones().catch(error => console.error('Error cargando el chat:', error));
         conectarChat();
     }
+
+    // Accesos directos de la app instalada (index.html#chat, #tareas…) abren esa sección
+    const seccion = document.getElementById(location.hash.slice(1));
+    if (seccion && seccion.classList.contains('section')) showSection(seccion.id);
 }
 
 async function loadProximosEventos() {
@@ -172,7 +176,19 @@ function updateDashboard(usuario) {
     }
 }
 
+// Menú lateral deslizable en el celular (en pantallas anchas siempre está visible)
+function alternarMenu(abrir) {
+    const abierto = document.body.classList.toggle('menu-abierto', abrir);
+    document.getElementById('btn-menu')?.setAttribute('aria-expanded', String(abierto));
+}
+
+document.addEventListener('keydown', evento => {
+    if (evento.key === 'Escape') alternarMenu(false);
+});
+
 function showSection(sectionId) {
+    alternarMenu(false);  // al elegir una sección en el celular, el menú se cierra
+    window.scrollTo(0, 0);
     document.querySelectorAll('.section').forEach(section => {
         section.classList.remove('active');
     });
@@ -3056,5 +3072,6 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 window.showSection = showSection;
+window.alternarMenu = alternarMenu;
 window.cargarClasesZoom = cargarClasesZoom;
 window.abrirClaseZoom = abrirClaseZoom;

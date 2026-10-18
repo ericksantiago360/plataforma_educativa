@@ -2,7 +2,14 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <meta name="theme-color" content="#2563eb">
+    <link rel="icon" href="/icons/favicon-32.png" sizes="32x32" type="image/png">
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Campus">
     <title>Campus Virtual - Universidad</title>
     <style>
         * {
@@ -437,13 +444,115 @@
         }
 
         /* Responsive */
+        /* Botón ☰, fondo del menú y opciones de cuenta: solo existen en pantallas angostas */
+        .btn-menu, .menu-fondo, .menu-cuenta {
+            display: none;
+        }
+
         @media (max-width: 768px) {
-            .sidebar {
+            /* App instalada en iPhone: el encabezado no queda debajo del reloj ni de la isla */
+            .header {
+                padding: calc(0.5rem + env(safe-area-inset-top)) 1rem 0.5rem;
+                position: sticky;
+                top: 0;
+                z-index: 900;
+            }
+
+            .logo {
+                font-size: 1.15rem;
+            }
+
+            .btn-menu {
+                display: block;
+                background: none;
+                border: none;
+                font-size: 1.6rem;
+                line-height: 1;
+                padding: 0.25rem 0.5rem;
+                cursor: pointer;
+                color: var(--gray-900);
+            }
+
+            /* El nombre y los botones de cuenta pasan al menú */
+            .header-right .btn-salir, .user-profile > div:last-child {
                 display: none;
             }
-            
+
+            .main-container {
+                display: block;
+                height: auto;
+            }
+
+            /* Menú lateral deslizable */
+            .sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                width: min(85vw, 300px);
+                z-index: 1000;
+                transform: translateX(-100%);
+                transition: transform 0.25s ease;
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+
+            body.menu-abierto .sidebar {
+                transform: none;
+            }
+
+            body.menu-abierto .menu-fondo {
+                display: block;
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.4);
+                z-index: 950;
+            }
+
+            body.menu-abierto {
+                overflow: hidden;
+            }
+
+            .menu-cuenta {
+                display: block;
+                border-top: 1px solid var(--gray-200);
+                margin-top: 0.5rem;
+                padding-top: 0.5rem;
+            }
+
+            .content {
+                padding: 1rem;
+                overflow: visible;
+            }
+
             .cards-grid {
                 grid-template-columns: 1fr;
+            }
+
+            .welcome-banner {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 1rem;
+                padding: 1.25rem;
+            }
+
+            .banner-text h2 {
+                font-size: 1.35rem;
+            }
+
+            .banner-image {
+                display: none;
+            }
+
+            /* Chat: lista arriba y conversación debajo */
+            #chat-panel {
+                border-left: none !important;
+                padding-left: 0 !important;
+                border-top: 1px solid var(--gray-200);
+                padding-top: 0.75rem;
+            }
+
+            #chat-lista {
+                max-height: 30vh !important;
             }
         }
     </style>
@@ -452,6 +561,8 @@
     <!-- Header -->
     <div class="header">
         <div class="header-left">
+            <button type="button" class="btn-menu" id="btn-menu" aria-label="Abrir menú" aria-expanded="false"
+                    aria-controls="menu-lateral" onclick="alternarMenu()">☰</button>
             <div class="logo">
                 🎓 Campus Virtual
             </div>
@@ -471,7 +582,7 @@
 
     <div class="main-container">
         <!-- Sidebar -->
-        <div class="sidebar">
+        <div class="sidebar" id="menu-lateral">
             <div class="sidebar-header">
                 <div class="student-info">
                     <div class="student-avatar">
@@ -551,8 +662,25 @@
                     <span class="menu-icon">⚙️</span>
                     <span>Administración</span>
                 </a>
+                <!-- Lo muestra js/pwa.js cuando el navegador permite instalar la app -->
+                <a href="#" class="menu-item" id="instalar-app" hidden onclick="instalarApp(); return false;">
+                    <span class="menu-icon">📲</span>
+                    <span>Instalar app</span>
+                </a>
+                <!-- En el celular, las opciones de cuenta del encabezado viven aquí -->
+                <div class="menu-cuenta">
+                    <a href="cambiar-password.html" class="menu-item">
+                        <span class="menu-icon">🔑</span>
+                        <span>Cambiar contraseña</span>
+                    </a>
+                    <a href="#" class="menu-item" onclick="cerrarSesion(); return false;">
+                        <span class="menu-icon">🚪</span>
+                        <span>Cerrar sesión</span>
+                    </a>
+                </div>
             </div>
         </div>
+        <div class="menu-fondo" onclick="alternarMenu(false)"></div>
 
         <!-- Content -->
         <div class="content">
@@ -930,6 +1058,7 @@
     </div>
 
     <script src="js/auth.js"></script>
+    <script src="js/pwa.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>
