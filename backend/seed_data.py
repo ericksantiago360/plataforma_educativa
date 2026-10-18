@@ -91,18 +91,14 @@ tarea1 = Tarea.objects.create(
     descripcion='Realizar análisis FODA de una empresa',
     curso=curso1,
     fecha_vencimiento=datetime.now() + timedelta(days=7),
-    estado='pendiente'
 )
-tarea1.estudiantes.add(est1, est2)
 
 tarea2 = Tarea.objects.create(
     titulo='Balance General',
     descripcion='Preparar balance general del mes',
     curso=curso2,
     fecha_vencimiento=datetime.now() + timedelta(days=3),
-    estado='pendiente'
 )
-tarea2.estudiantes.add(est2, est3)
 
 # Crear comunicados
 com1 = Comunicado.objects.create(

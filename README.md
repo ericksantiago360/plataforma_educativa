@@ -132,6 +132,7 @@ Filtros y acciones extra:
 - `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
 - `calendario/?proximos=1` omite los eventos que ya terminaron.
 - `POST idiomas/<id>/inscribir/` y `POST idiomas/<id>/cancelar/` inscriben o dan de baja al estudiante de la sesión (respetando el cupo).
+- `POST tareas/<id>/estado/` con `{"estado": "completada"}` marca el avance del estudiante de la sesión. Al listar tareas, el estudiante recibe su `estado` y profesor/staff un `resumen` del grupo.
 - `POST estudiantes/alta/` (staff) crea estudiante + cuenta (usuario = matrícula) + perfil y devuelve **una sola vez** la contraseña temporal.
 - `GET cursos/<id>/inscritos/` (profesor y staff), `POST cursos/<id>/inscribir/` y `POST cursos/<id>/quitar/` (staff) con `{estudiante}`.
 - `POST materias/<id>/inscribir_grupo/` (staff) con `{periodo}` crea el historial "cursando" de cada alumno activo del curso que aún no lo tenga.
@@ -210,10 +211,19 @@ Si un usuario pide un registro que no le corresponde, la API responde **404** (n
 - descripcion
 - curso (FK)
 - fecha_vencimiento
-- estado (pendiente/en_progreso/completada)
 - creado
-- estudiantes (ManyToMany)
 ```
+La tarea es de todo el curso, también para quien se inscriba después.
+
+### Tabla: **EntregaTarea**
+```
+- id (PK)
+- tarea (FK)
+- estudiante (FK)
+- estado (pendiente/en_progreso/completada)
+- actualizado
+```
+El avance de cada alumno en una tarea. Se crea la primera vez que el alumno cambia su estado; sin registro, la tarea está pendiente para él.
 
 ### Tabla: **Comunicado**
 ```
@@ -334,7 +344,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 93 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, materias, calificaciones y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 109 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas y avance por alumno, comunicados, materias, calificaciones y promedio, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash

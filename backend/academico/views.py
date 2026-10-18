@@ -107,7 +107,7 @@ class ControlEscolarViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
     ruta_estudiante = 'estudiante'
     ruta_curso = 'materia__curso'
 
-    # Tras capturar una calificación, el perfil (promedio, progreso) debe reflejarla
+    # Tras capturar o borrar una calificación, el perfil (promedio, progreso) debe reflejarlo
     def perform_create(self, serializer):
         super().perform_create(serializer)
         self._recalcular_perfil(serializer.instance.estudiante)
@@ -115,6 +115,11 @@ class ControlEscolarViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
     def perform_update(self, serializer):
         super().perform_update(serializer)
         self._recalcular_perfil(serializer.instance.estudiante)
+
+    def perform_destroy(self, instance):
+        estudiante = instance.estudiante
+        super().perform_destroy(instance)
+        self._recalcular_perfil(estudiante)
 
     def _recalcular_perfil(self, estudiante):
         perfil = getattr(estudiante, 'perfil', None)

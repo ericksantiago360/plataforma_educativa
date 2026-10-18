@@ -1,6 +1,16 @@
+import re
+
 from django.db import models
 from django.contrib.auth.models import User
 from estudiantes.models import Estudiante
+
+PERIODO = re.compile(r'^(\d{4})-(\d{1,2})$')
+
+
+def clave_periodo(periodo):
+    """'2026-2' → (2026, 2), para ordenar periodos como números ('2026-10' va después de '2026-9')."""
+    coincidencia = PERIODO.match(periodo or '')
+    return tuple(int(parte) for parte in coincidencia.groups()) if coincidencia else (0, 0)
 
 class PerfilEstudiante(models.Model):
     NIVELES_EDUCATIVOS = [
@@ -29,11 +39,21 @@ class PerfilEstudiante(models.Model):
         return f"Perfil de {self.estudiante.nombre} {self.estudiante.apellido}"
 
     def recalcular(self):
-        """Actualiza materias aprobadas, progreso y promedio a partir del historial (ControlEscolar)."""
-        registros = self.estudiante.historial_escolar.all()
-        self.materias_cursadas = registros.filter(estado='aprobado').count()
-        promedio = registros.filter(calificacion__isnull=False).aggregate(p=models.Avg('calificacion'))['p']
-        self.promedio = round(promedio or 0, 2)
+        """
+        Actualiza materias aprobadas, progreso y promedio a partir del historial (ControlEscolar).
+        Solo cuentan calificaciones finales (aprobado/reprobado) y, si una materia se cursó varias veces,
+        solo el último intento: un parcial de una materia en curso o un reprobado ya recursado no bajan el promedio.
+        """
+        ultimos = {}
+        for registro in self.estudiante.historial_escolar.filter(estado__in=('aprobado', 'reprobado')):
+            clave = (clave_periodo(registro.periodo), registro.pk)
+            if registro.materia_id not in ultimos or clave > ultimos[registro.materia_id][0]:
+                ultimos[registro.materia_id] = (clave, registro)
+        finales = [registro for _, registro in ultimos.values()]
+
+        self.materias_cursadas = sum(1 for registro in finales if registro.estado == 'aprobado')
+        calificaciones = [registro.calificacion for registro in finales if registro.calificacion is not None]
+        self.promedio = round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else 0
         if self.materias_totales:
             self.progreso_academico = min(100, round(self.materias_cursadas * 100 / self.materias_totales))
         self.save(update_fields=['materias_cursadas', 'promedio', 'progreso_academico'])

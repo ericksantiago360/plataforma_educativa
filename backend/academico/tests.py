@@ -30,6 +30,36 @@ class CalificacionesTests(BaseAuthTest):
         self.assertEqual((self.perfil.materias_cursadas, float(self.perfil.promedio), self.perfil.progreso_academico),
                          (1, 9.5, 10))
 
+    def perfil_actual(self):
+        self.perfil.refresh_from_db()
+        return self.perfil.materias_cursadas, float(self.perfil.promedio)
+
+    def test_promedio_ignora_materias_en_curso_y_bajas(self):
+        otra = Materia.objects.create(nombre='Cálculo', codigo='CAL', creditos=3, nivel=1, descripcion='', curso=self.curso)
+        tercera = Materia.objects.create(nombre='Geometría', codigo='GEO', creditos=3, nivel=1, descripcion='', curso=self.curso)
+        ControlEscolar.objects.create(estudiante=self.ana, materia=otra, periodo='2026-2', estado='cursando', calificacion=4)
+        ControlEscolar.objects.create(estudiante=self.ana, materia=tercera, periodo='2026-2', estado='baja', calificacion=3)
+
+        self.client.force_authenticate(self.profe)
+        self.client.patch(self.url, {'calificacion': '9.5', 'estado': 'aprobado'})
+        self.assertEqual(self.perfil_actual(), (1, 9.5))
+
+    def test_solo_cuenta_el_ultimo_intento_de_cada_materia(self):
+        # Reprobó en 2026-9 y aprobó en 2026-10: '2026-10' es posterior aunque como texto ordene antes
+        self.registro.delete()
+        ControlEscolar.objects.create(estudiante=self.ana, materia=self.materia, periodo='2026-9', estado='reprobado', calificacion=5)
+        ControlEscolar.objects.create(estudiante=self.ana, materia=self.materia, periodo='2026-10', estado='aprobado', calificacion=9)
+        self.perfil.recalcular()
+        self.assertEqual(self.perfil_actual(), (1, 9.0))
+
+    def test_borrar_calificacion_recalcula_el_perfil(self):
+        self.client.force_authenticate(self.profe)
+        self.client.patch(self.url, {'calificacion': '9.5', 'estado': 'aprobado'})
+        self.assertEqual(self.client.delete(self.url).status_code, 204)
+        self.perfil.refresh_from_db()
+        self.assertEqual((self.perfil.materias_cursadas, float(self.perfil.promedio), self.perfil.progreso_academico),
+                         (0, 0.0, 0))
+
     def test_rango_de_calificacion(self):
         self.client.force_authenticate(self.profe)
         for valor in ('-1', '10.5', '11'):

@@ -1149,6 +1149,12 @@ const BADGES_TAREA = {
     completada: 'badge-completed',
 };
 
+const ESTADOS_TAREA = [
+    ['pendiente', 'Pendiente'],
+    ['en_progreso', 'En progreso'],
+    ['completada', 'Completada'],
+];
+
 function puedeGestionarTareas() {
     return Boolean(usuarioActual) && ['profesor', 'staff'].includes(usuarioActual.rol);
 }
@@ -1218,14 +1224,23 @@ async function loadTareas() {
     const ahora = new Date();
     lista.forEach(tarea => {
         const vence = new Date(tarea.fecha_vencimiento);
-        const vencida = vence < ahora && tarea.estado !== 'completada';
+        // El alumno ve su propio estado; profesor y staff, el avance del grupo
+        let badge;
+        if (tarea.resumen) {
+            const { completadas, alumnos } = tarea.resumen;
+            const clase = alumnos > 0 && completadas === alumnos ? 'badge-completed' : (vence < ahora ? 'badge-live' : 'badge-scheduled');
+            badge = `<div class="clase-badge ${clase}">${escapeHtml(completadas)}/${escapeHtml(alumnos)} completadas</div>`;
+        } else {
+            const vencida = vence < ahora && tarea.estado !== 'completada';
+            badge = `<div class="clase-badge ${vencida ? 'badge-live' : (BADGES_TAREA[tarea.estado] || 'badge-neutral')}">
+                        ${vencida ? 'Vencida' : escapeHtml(tarea.estado_nombre)}
+                    </div>`;
+        }
         html += `
             <div class="clase-item">
                 <div class="clase-header">
                     <div class="clase-title">${escapeHtml(tarea.titulo)}</div>
-                    <div class="clase-badge ${vencida ? 'badge-live' : (BADGES_TAREA[tarea.estado] || 'badge-neutral')}">
-                        ${vencida ? 'Vencida' : escapeHtml(tarea.estado_nombre)}
-                    </div>
+                    ${badge}
                 </div>
                 <div style="color: var(--gray-700); font-size: 0.85rem;">
                     ${escapeHtml(tarea.curso_nombre)} · Entrega: ${escapeHtml(vence.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }))}
@@ -1234,6 +1249,13 @@ async function loadTareas() {
                 ${puedeGestionarTareas() ? `
                     <button type="button" class="tarea-eliminar" data-tarea-id="${escapeHtml(tarea.id)}"
                             style="${ESTILO_ACCION} color: var(--danger); margin-top: 0.75rem;">Eliminar</button>` : ''}
+                ${currentStudent ? `
+                    <label style="display: block; margin-top: 0.75rem; font-size: 0.85rem;">Mi avance:
+                        <select class="tarea-estado" data-tarea-id="${escapeHtml(tarea.id)}" style="${ESTILO_CAMPO} width: auto; margin-left: 0.5rem;">
+                            ${ESTADOS_TAREA.map(([valor, nombre]) =>
+                                `<option value="${valor}"${valor === tarea.estado ? ' selected' : ''}>${nombre}</option>`).join('')}
+                        </select>
+                    </label>` : ''}
             </div>
         `;
     });
@@ -1245,6 +1267,28 @@ async function loadTareas() {
     container.querySelectorAll('.tarea-eliminar').forEach(boton => {
         boton.addEventListener('click', () => eliminarTarea(boton.dataset.tareaId));
     });
+    container.querySelectorAll('.tarea-estado').forEach(selector => {
+        selector.addEventListener('change', () => cambiarEstadoTarea(selector));
+    });
+}
+
+async function cambiarEstadoTarea(selector) {
+    selector.disabled = true;
+    try {
+        const response = await api(`/tareas/${encodeURIComponent(selector.dataset.tareaId)}/estado/`, {
+            method: 'POST',
+            body: JSON.stringify({ estado: selector.value }),
+        });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo guardar tu avance.'));
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+    }
+    // Se recarga para reflejar el badge y el contador de pendientes del inicio
+    await loadTasks();
+    updateDashboard(usuarioActual);
+    await loadTareas();
 }
 
 async function crearTarea(evento) {
