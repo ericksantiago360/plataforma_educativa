@@ -37,6 +37,11 @@ async function verificarSesion() {
         return null;
     }
     const usuario = await respuesta.json();
+    // Con la contraseña temporal del alta no se entra al campus hasta cambiarla
+    if (usuario.debe_cambiar_password) {
+        window.location.replace('cambiar-password.html');
+        return null;
+    }
     mostrarUsuario(usuario);
     aplicarRol(usuario.rol);
     document.body.classList.remove('cargando');

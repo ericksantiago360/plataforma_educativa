@@ -464,6 +464,7 @@
                     <div id="header-rol" style="font-size: 0.75rem; color: var(--gray-700);"></div>
                 </div>
             </div>
+            <a class="btn-salir" href="cambiar-password.html" style="text-decoration: none;">Cambiar contraseña</a>
             <button type="button" class="btn-salir" onclick="cerrarSesion()">Cerrar sesión</button>
         </div>
     </div>
@@ -535,6 +536,10 @@
                 <a href="#" class="menu-item" onclick="showSection('foro'); return false;">
                     <span class="menu-icon">💬</span>
                     <span>Foro de Clase</span>
+                </a>
+                <a href="#" class="menu-item" data-roles="estudiante,staff" onclick="showSection('pagos'); return false;">
+                    <span class="menu-icon">💳</span>
+                    <span>Pagos</span>
                 </a>
                 <a href="#" class="menu-item" data-roles="staff" onclick="showSection('administracion'); return false;">
                     <span class="menu-icon">⚙️</span>
@@ -755,6 +760,12 @@
             <div id="contenido" class="section">
                 <h2 style="color: white; margin-bottom: 1.5rem;">📖 Contenido de Materias</h2>
                 <div id="contenido-contenido"><div class="card"><p>Cargando…</p></div></div>
+            </div>
+
+            <!-- Pagos Section (estudiante: su estado de cuenta; staff: caja) -->
+            <div id="pagos" class="section">
+                <h2 style="color: white; margin-bottom: 1.5rem;">💳 Pagos</h2>
+                <div id="pagos-contenido"><div class="card"><p>Cargando…</p></div></div>
             </div>
 
             <!-- Administración Section (solo staff) -->

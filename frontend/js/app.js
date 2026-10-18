@@ -221,6 +221,9 @@ function showSection(sectionId) {
         case 'administracion':
             loadAdministracion();
             break;
+        case 'pagos':
+            loadPagos();
+            break;
     }
 }
 
@@ -250,7 +253,7 @@ async function loadControlEscolar() {
         return;
     }
 
-    let html = `<h3 style="margin-bottom: 1rem;">${titulo}</h3>`;
+    let html = `<h3 style="margin-bottom: 1rem;">${titulo}</h3>` + htmlReportes(registros);
 
     if (registros.length === 0) {
         html += '<div class="card"><p>Aún no hay materias registradas.</p></div>';
@@ -279,9 +282,69 @@ async function loadControlEscolar() {
     });
 
     container.innerHTML = html;
+    conectarReportes();
     container.querySelectorAll('.calificacion-guardar').forEach(boton => {
         boton.addEventListener('click', () => guardarCalificacion(boton.dataset.registroId, boton.closest('.calificacion-editor')));
     });
+}
+
+// Reportes en PDF: el alumno descarga su kardex; profesor y staff, el reporte de grupo (y el staff, el kardex de un alumno).
+// Las opciones salen de los registros ya cargados, así que solo aparecen grupos y alumnos con historial.
+function htmlReportes(registros) {
+    if (currentStudent) {
+        return `
+            <div class="card" style="margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                <span>Tu historial completo con promedio y créditos aprobados.</span>
+                <a class="btn btn-primary" style="text-decoration: none;"
+                   href="/api/estudiantes/${encodeURIComponent(currentStudent.id)}/kardex/">📄 Descargar kardex (PDF)</a>
+            </div>
+        `;
+    }
+    if (registros.length === 0) return '';
+
+    const grupos = new Map();
+    const alumnos = new Map();
+    registros.forEach(r => {
+        grupos.set(`${r.materia}|${r.periodo}`, `${r.materia_nombre} · ${r.periodo}`);
+        alumnos.set(r.estudiante, `${r.estudiante_apellido}, ${r.estudiante_nombre}`);
+    });
+    const opciones = mapa => [...mapa.entries()]
+        .sort((a, b) => a[1].localeCompare(b[1], 'es'))
+        .map(([valor, texto]) => `<option value="${escapeHtml(valor)}">${escapeHtml(texto)}</option>`).join('');
+
+    return `
+        <div class="card" style="margin-bottom: 1rem;">
+            <h4 style="margin-bottom: 0.75rem;">📄 Reportes en PDF</h4>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.5rem;">
+                <label for="reporte-grupo" style="font-size: 0.85rem;">Reporte de grupo:</label>
+                <select id="reporte-grupo" style="${ESTILO_CAMPO} width: auto; flex: 1;">${opciones(grupos)}</select>
+                <button type="button" class="btn btn-primary" id="reporte-grupo-descargar">Descargar</button>
+            </div>
+            ${usuarioActual.rol === 'staff' ? `
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                    <label for="reporte-kardex" style="font-size: 0.85rem;">Kardex de un alumno:</label>
+                    <select id="reporte-kardex" style="${ESTILO_CAMPO} width: auto; flex: 1;">${opciones(alumnos)}</select>
+                    <button type="button" class="btn btn-primary" id="reporte-kardex-descargar">Descargar</button>
+                </div>` : ''}
+        </div>
+    `;
+}
+
+function conectarReportes() {
+    const grupo = document.getElementById('reporte-grupo-descargar');
+    if (grupo) {
+        grupo.addEventListener('click', () => {
+            const [materia, periodo] = document.getElementById('reporte-grupo').value.split('|');
+            window.location.href = `/api/materias/${encodeURIComponent(materia)}/reporte_grupo/?periodo=${encodeURIComponent(periodo)}`;
+        });
+    }
+    const kardex = document.getElementById('reporte-kardex-descargar');
+    if (kardex) {
+        kardex.addEventListener('click', () => {
+            const estudiante = document.getElementById('reporte-kardex').value;
+            window.location.href = `/api/estudiantes/${encodeURIComponent(estudiante)}/kardex/`;
+        });
+    }
 }
 
 // Captura de calificación en línea para profesor y staff (la API limita al profesor a sus materias)
@@ -2371,6 +2434,292 @@ async function quitarAdjunto(contenido, archivoId) {
         archivos: contenido.archivos.filter(a => String(a.id) !== String(archivoId)),
     };
     await editarContenido(borrador);
+}
+
+// ---------- Pagos ----------
+// El alumno ve su estado de cuenta, solicita trámites y descarga recibos.
+// El staff funciona como caja: genera cargos, registra pagos y los anula si hubo un error.
+
+const ESTADOS_CARGO = {
+    pendiente: { clase: 'badge-scheduled', texto: 'Pendiente' },
+    parcial: { clase: 'badge-scheduled', texto: 'Pago parcial' },
+    pagado: { clase: 'badge-completed', texto: 'Pagado' },
+    cancelado: { clase: 'badge-neutral', texto: 'Cancelado' },
+};
+const METODOS_PAGO = [['efectivo', 'Efectivo'], ['transferencia', 'Transferencia'], ['deposito', 'Depósito bancario'], ['tarjeta', 'Tarjeta (terminal)']];
+const TIPOS_CONCEPTO = [['colegiatura', 'Colegiatura'], ['inscripcion', 'Inscripción'], ['tramite', 'Trámite']];
+
+let pagosDatos = { cargos: [], conceptos: [], estudiantes: [] };
+let filtroPagos = { estado: 'saldo', texto: '' };
+
+const pesos = monto => formatoPrecio.format(Number(monto));
+
+async function loadPagos() {
+    const container = document.getElementById('pagos-contenido');
+    if (!container) return;
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+    try {
+        const esStaff = usuarioActual.rol === 'staff';
+        const [cargos, conceptos, estudiantes] = await Promise.all([
+            getTodas('/cargos/'),
+            getTodas('/conceptos-pago/'),
+            esStaff ? getTodas('/estudiantes/') : Promise.resolve([]),
+        ]);
+        pagosDatos = { cargos, conceptos, estudiantes };
+    } catch (error) {
+        console.error('Error cargando pagos:', error);
+        errorDeCarga(container, 'los pagos');
+        return;
+    }
+    renderPagos();
+}
+
+function renderPagos() {
+    const container = document.getElementById('pagos-contenido');
+    const esStaff = usuarioActual.rol === 'staff';
+    const { cargos } = pagosDatos;
+    const vigentes = cargos.filter(c => c.estado !== 'cancelado');
+    const saldo = vigentes.reduce((total, c) => total + Number(c.saldo), 0);
+    const vencidos = vigentes.filter(c => c.vencido).length;
+
+    let html = `
+        <div class="card" style="margin-bottom: 1rem; display: flex; gap: 2rem; flex-wrap: wrap; align-items: center;">
+            <div><div style="font-size: 0.85rem; color: var(--gray-700);">${esStaff ? 'Saldo por cobrar' : 'Saldo pendiente'}</div>
+                 <div style="font-size: 1.6rem; font-weight: 700;">${escapeHtml(pesos(saldo))}</div></div>
+            <div><div style="font-size: 0.85rem; color: var(--gray-700);">Cargos vencidos</div>
+                 <div style="font-size: 1.6rem; font-weight: 700; color: ${vencidos ? 'var(--danger)' : 'inherit'};">${escapeHtml(vencidos)}</div></div>
+            ${esStaff ? '' : `<p style="flex: 1; min-width: 220px; font-size: 0.85rem; color: var(--gray-700);">
+                Paga en caja, por transferencia o depósito. Control Escolar registra tu pago y aquí aparece tu recibo.</p>`}
+        </div>
+    `;
+    html += esStaff ? htmlCajaPagos() : htmlSolicitarTramite();
+
+    const lista = esStaff ? cargosFiltrados() : cargos;
+    html += `<div class="clases-list"><h3 style="margin-bottom: 1rem;">${esStaff ? 'Cargos' : 'Mi estado de cuenta'}</h3>`;
+    if (esStaff) html += htmlFiltroPagos();
+    html += lista.length === 0 ? '<p>No hay cargos.</p>' : lista.map(c => htmlCargo(c, esStaff)).join('');
+    html += '</div>';
+
+    container.innerHTML = html;
+    conectarPagos();
+}
+
+function opcionesDe(pares, seleccionado) {
+    return pares.map(([valor, texto]) =>
+        `<option value="${escapeHtml(valor)}"${String(valor) === String(seleccionado) ? ' selected' : ''}>${escapeHtml(texto)}</option>`).join('');
+}
+
+function htmlSolicitarTramite() {
+    const tramites = pagosDatos.conceptos.filter(c => c.tipo === 'tramite');
+    if (tramites.length === 0) return '';
+    return `
+        <div class="card" style="margin-bottom: 1rem;">
+            <h4 style="margin-bottom: 0.75rem;">Solicitar un trámite</h4>
+            <form id="tramite-form" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <select id="tramite-concepto" aria-label="Trámite" style="${ESTILO_CAMPO} width: auto; flex: 1;">
+                    ${opcionesDe(tramites.map(c => [c.id, `${c.nombre} · ${pesos(c.monto)}`]))}
+                </select>
+                <button type="submit" class="btn btn-primary">Solicitar</button>
+            </form>
+            <p class="pagos-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem;"></p>
+        </div>
+    `;
+}
+
+function htmlCajaPagos() {
+    const { conceptos, estudiantes } = pagosDatos;
+    const masivos = conceptos.filter(c => c.activo && ['colegiatura', 'inscripcion'].includes(c.tipo));
+    const activos = conceptos.filter(c => c.activo);
+    const alumnos = estudiantes.filter(e => e.activo)
+        .map(e => [e.id, `${e.apellido}, ${e.nombre} (${e.matricula})`])
+        .sort((a, b) => a[1].localeCompare(b[1], 'es'));
+    const etiqueta = c => [c.id, `${c.nombre} · ${pesos(c.monto)}`];
+    const campo = `${ESTILO_CAMPO} width: auto; flex: 1; min-width: 140px;`;
+
+    return `
+        <div class="card" style="margin-bottom: 1rem;">
+            <h4 style="margin-bottom: 0.75rem;">Cargo a todos los alumnos activos</h4>
+            ${masivos.length === 0 ? '<p style="font-size: 0.85rem;">Primero crea un concepto de colegiatura o inscripción.</p>' : `
+            <form id="cargo-masivo-form" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <select name="concepto" aria-label="Concepto" style="${campo}">${opcionesDe(masivos.map(etiqueta))}</select>
+                <input name="periodo" placeholder="Periodo (2026-2)" required pattern="\\d{4}-\\d{1,2}" aria-label="Periodo" style="${campo}">
+                <input name="fecha_limite" type="date" aria-label="Fecha límite" style="${campo}">
+                <button type="submit" class="btn btn-primary">Generar cargos</button>
+            </form>`}
+
+            <h4 style="margin: 1.25rem 0 0.75rem;">Cargo a un alumno</h4>
+            ${activos.length === 0 ? '<p style="font-size: 0.85rem;">Primero crea un concepto.</p>' : `
+            <form id="cargo-form" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <select name="estudiante" aria-label="Alumno" style="${campo}">${opcionesDe(alumnos)}</select>
+                <select name="concepto" aria-label="Concepto" style="${campo}">${opcionesDe(activos.map(etiqueta))}</select>
+                <input name="periodo" placeholder="Periodo (opcional)" pattern="\\d{4}-\\d{1,2}" aria-label="Periodo" style="${campo}">
+                <input name="fecha_limite" type="date" aria-label="Fecha límite" style="${campo}">
+                <button type="submit" class="btn btn-primary">Crear cargo</button>
+            </form>`}
+
+            <h4 style="margin: 1.25rem 0 0.75rem;">Nuevo concepto del catálogo</h4>
+            <form id="concepto-form" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <input name="nombre" placeholder="Nombre (p. ej. Constancia de estudios)" required maxlength="200" aria-label="Nombre" style="${campo}">
+                <select name="tipo" aria-label="Tipo" style="${campo}">${opcionesDe(TIPOS_CONCEPTO)}</select>
+                <input name="monto" type="number" min="0.01" step="0.01" placeholder="Monto" required aria-label="Monto" style="${campo}">
+                <button type="submit" class="btn btn-primary">Agregar</button>
+            </form>
+            <p class="pagos-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; white-space: pre-line;"></p>
+            <p class="pagos-aviso" role="status" style="color: var(--success); font-size: 0.85rem;"></p>
+        </div>
+    `;
+}
+
+function htmlFiltroPagos() {
+    return `
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+            <select id="pagos-filtro-estado" aria-label="Filtrar por estado" style="${ESTILO_CAMPO} width: auto;">
+                ${opcionesDe([['saldo', 'Con saldo pendiente'], ['vencidos', 'Vencidos'], ['pagado', 'Pagados'],
+                              ['cancelado', 'Cancelados'], ['todos', 'Todos']], filtroPagos.estado)}
+            </select>
+            <input id="pagos-filtro-texto" type="search" placeholder="Buscar alumno, matrícula o concepto"
+                   value="${escapeHtml(filtroPagos.texto)}" style="${ESTILO_CAMPO} width: auto; flex: 1;">
+        </div>
+    `;
+}
+
+function cargosFiltrados() {
+    const texto = filtroPagos.texto.trim().toLowerCase();
+    return pagosDatos.cargos.filter(c => {
+        const porEstado = {
+            saldo: c.estado === 'pendiente' || c.estado === 'parcial',
+            vencidos: c.vencido,
+            pagado: c.estado === 'pagado',
+            cancelado: c.estado === 'cancelado',
+            todos: true,
+        }[filtroPagos.estado];
+        const porTexto = !texto || `${c.estudiante_nombre} ${c.matricula} ${c.descripcion}`.toLowerCase().includes(texto);
+        return porEstado && porTexto;
+    });
+}
+
+function htmlCargo(cargo, esStaff) {
+    const estado = cargo.vencido ? { clase: 'badge-live', texto: 'Vencido' } : ESTADOS_CARGO[cargo.estado];
+    const pagos = cargo.pagos.map(pago => `
+        <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; padding: 0.25rem 0;
+                    ${pago.anulado ? 'color: var(--gray-700); text-decoration: line-through;' : ''}">
+            <span>${escapeHtml(pago.folio)} · ${escapeHtml(formatearFecha(pago.fecha))} · ${escapeHtml(pago.metodo_nombre)}
+                  ${pago.referencia ? `· ${escapeHtml(pago.referencia)}` : ''} · <strong>${escapeHtml(pesos(pago.monto))}</strong></span>
+            <span style="text-decoration: none;">
+                ${pago.anulado ? `<span style="color: var(--danger);" title="${escapeHtml(pago.motivo_anulacion)}">Anulado</span>` : ''}
+                <a href="${escapeHtml(pago.recibo_url)}" style="margin-left: 0.5rem;">Recibo PDF</a>
+                ${esStaff && !pago.anulado ? `<button type="button" class="pago-anular" data-pago-id="${escapeHtml(pago.id)}"
+                        style="${ESTILO_ACCION} color: var(--danger); margin-left: 0.5rem;">Anular</button>` : ''}
+            </span>
+        </div>
+    `).join('');
+
+    const puedeCobrar = esStaff && Number(cargo.saldo) > 0;
+    return `
+        <div class="clase-item">
+            <div class="clase-header">
+                <div class="clase-title">${escapeHtml(cargo.descripcion)}${cargo.periodo ? ` · ${escapeHtml(cargo.periodo)}` : ''}</div>
+                <div class="clase-badge ${estado.clase}">${escapeHtml(estado.texto)}</div>
+            </div>
+            ${esStaff ? `<div style="font-size: 0.85rem;">${escapeHtml(cargo.estudiante_nombre)} · ${escapeHtml(cargo.matricula)}</div>` : ''}
+            <div style="font-size: 0.85rem; color: var(--gray-700);">
+                Monto ${escapeHtml(pesos(cargo.monto))} · Pagado ${escapeHtml(pesos(cargo.pagado))} ·
+                <strong>Saldo ${escapeHtml(pesos(cargo.saldo))}</strong>
+                ${cargo.fecha_limite ? ` · Fecha límite: ${escapeHtml(formatearDia(cargo.fecha_limite))}` : ''}
+            </div>
+            ${pagos ? `<div style="margin-top: 0.5rem;">${pagos}</div>` : ''}
+            ${puedeCobrar ? `
+                <form class="pago-form" data-cargo-id="${escapeHtml(cargo.id)}" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.75rem;">
+                    <input name="monto" type="number" min="0.01" step="0.01" max="${escapeHtml(cargo.saldo)}" value="${escapeHtml(cargo.saldo)}"
+                           required aria-label="Monto" style="${ESTILO_CAMPO} width: 8rem;">
+                    <select name="metodo" aria-label="Forma de pago" style="${ESTILO_CAMPO} width: auto;">${opcionesDe(METODOS_PAGO)}</select>
+                    <input name="referencia" placeholder="Referencia (opcional)" maxlength="100" aria-label="Referencia"
+                           style="${ESTILO_CAMPO} width: auto; flex: 1;">
+                    <button type="submit" class="btn btn-primary">Registrar pago</button>
+                    ${Number(cargo.pagado) === 0 ? `<button type="button" class="cargo-cancelar" data-cargo-id="${escapeHtml(cargo.id)}"
+                            style="${ESTILO_ACCION} color: var(--danger);">Cancelar cargo</button>` : ''}
+                </form>
+                <p class="pago-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-top: 0.25rem;"></p>` : ''}
+        </div>
+    `;
+}
+
+function conectarPagos() {
+    const container = document.getElementById('pagos-contenido');
+    const enviar = (id, manejador) => {
+        const form = document.getElementById(id);
+        if (form) form.addEventListener('submit', evento => { evento.preventDefault(); manejador(form); });
+    };
+    enviar('tramite-form', () => accionPagos('/cargos/solicitar_tramite/',
+        { concepto: document.getElementById('tramite-concepto').value }, 'Trámite solicitado.'));
+    enviar('cargo-masivo-form', form => accionPagos('/cargos/masivo/', datosDe(form),
+        r => `Se generaron ${r.creados} cargos (${r.ya_tenian} alumnos ya lo tenían).`));
+    enviar('cargo-form', form => accionPagos('/cargos/', datosDe(form), 'Cargo creado.'));
+    enviar('concepto-form', form => accionPagos('/conceptos-pago/', datosDe(form), 'Concepto agregado.'));
+
+    container.querySelectorAll('.pago-form').forEach(form => {
+        form.addEventListener('submit', evento => {
+            evento.preventDefault();
+            accionPagos(`/cargos/${encodeURIComponent(form.dataset.cargoId)}/pagar/`, datosDe(form),
+                r => `Pago ${r.pago.folio} registrado.`, form.nextElementSibling);
+        });
+    });
+    container.querySelectorAll('.cargo-cancelar').forEach(boton => {
+        boton.addEventListener('click', () => {
+            if (!confirm('¿Cancelar este cargo? El alumno ya no lo deberá.')) return;
+            accionPagos(`/cargos/${encodeURIComponent(boton.dataset.cargoId)}/cancelar/`, {}, 'Cargo cancelado.',
+                boton.closest('form').nextElementSibling);
+        });
+    });
+    container.querySelectorAll('.pago-anular').forEach(boton => {
+        boton.addEventListener('click', () => {
+            const motivo = prompt('Motivo de la anulación (queda registrado):');
+            if (!motivo || !motivo.trim()) return;
+            accionPagos(`/pagos/${encodeURIComponent(boton.dataset.pagoId)}/anular/`, { motivo: motivo.trim() }, 'Pago anulado.');
+        });
+    });
+
+    const estado = document.getElementById('pagos-filtro-estado');
+    if (estado) estado.addEventListener('change', () => { filtroPagos.estado = estado.value; renderPagos(); });
+    const texto = document.getElementById('pagos-filtro-texto');
+    if (texto) {
+        texto.addEventListener('input', () => {
+            filtroPagos.texto = texto.value;
+            renderPagos();
+            const nuevo = document.getElementById('pagos-filtro-texto');
+            nuevo.focus();
+            nuevo.setSelectionRange(nuevo.value.length, nuevo.value.length);
+        });
+    }
+}
+
+// Campos del formulario sin los vacíos (la API toma los opcionales como ausentes)
+function datosDe(form) {
+    return Object.fromEntries([...new FormData(form).entries()].filter(([, valor]) => String(valor).trim() !== ''));
+}
+
+// Envía la acción, recarga los datos y muestra el resultado; exito puede ser texto o función de la respuesta
+async function accionPagos(ruta, datos, exito, lugarError) {
+    let respuesta, cuerpo;
+    try {
+        respuesta = await api(ruta, { method: 'POST', body: JSON.stringify(datos) });
+        cuerpo = await respuesta.json().catch(() => ({}));
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    if (!respuesta.ok) {
+        const mensaje = mensajeDeError(cuerpo, 'No se pudo completar la operación.');
+        const destino = lugarError || document.querySelector('#pagos-contenido .pagos-error');
+        if (destino) destino.textContent = mensaje;
+        else alert(mensaje);
+        return;
+    }
+    await loadPagos();
+    const aviso = document.querySelector('#pagos-contenido .pagos-aviso');
+    const texto = typeof exito === 'function' ? exito(cuerpo) : exito;
+    if (aviso) aviso.textContent = texto;
+    else alert(texto);
 }
 
 window.addEventListener('DOMContentLoaded', () => {

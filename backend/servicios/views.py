@@ -8,6 +8,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import AlcancePorRolMixin, EstudianteAutor, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, estudiante_de, rol_de
+from pagos.models import cargar_curso_idiomas, cargo_vigente_de_idiomas
 from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
 from .serializers import BibliotecaDigitalSerializer, MesaAyudaSerializer, EventoCalendarioSerializer, CentroIdiomasSerializer
 
@@ -82,13 +83,23 @@ class CentroIdiomasViewSet(viewsets.ModelViewSet):
                 if curso.cupos_disponibles <= 0:
                     return Response({'detail': 'Ya no hay cupo en este curso.'}, status=status.HTTP_400_BAD_REQUEST)
                 curso.estudiantes_inscritos.add(estudiante)
+                cargar_curso_idiomas(curso, estudiante)
         return Response(self.get_serializer(curso).data)
 
     @action(detail=True, methods=['post'])
     def cancelar(self, request, pk=None):
         estudiante = self._estudiante()
         curso = self.get_object()
-        curso.estudiantes_inscritos.remove(estudiante)
+        with transaction.atomic():
+            cargo = cargo_vigente_de_idiomas(curso, estudiante)
+            # Si ya pagó, la baja (y la devolución) las resuelve Control Escolar; si no, el cargo se cancela
+            if cargo and cargo.pagado > 0:
+                return Response({'detail': 'Ya tienes pagos en este curso: acude a Control Escolar para darte de baja.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if cargo:
+                cargo.cancelado = True
+                cargo.save(update_fields=['cancelado'])
+            curso.estudiantes_inscritos.remove(estudiante)
         return Response(self.get_serializer(curso).data)
 
     def _estudiante(self):

@@ -259,3 +259,92 @@ class EstudianteDadoDeBajaTests(BaseAuthTest):
         self.dar_de_baja(self.beto)
         r = self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': 'x'})
         self.assertEqual(r.status_code, 200)
+
+
+class CambiarPasswordTests(BaseAuthTest):
+    URL = '/api/auth/cambiar-password/'
+    NUEVA = 'Tortuga-Azul-2026'
+
+    def setUp(self):
+        super().setUp()
+        # Sesión real: cambiar la contraseña debe conservarla (update_session_auth_hash)
+        self.client.login(username='ana', password='x')
+
+    def cambiar(self, actual='x', nueva=NUEVA, client=None):
+        return (client or self.client).post(self.URL, {'password_actual': actual, 'password_nueva': nueva})
+
+    def test_cambia_la_contrasena_y_conserva_la_sesion(self):
+        r = self.cambiar()
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client.get('/api/auth/me/').status_code, 200)
+
+        self.client.logout()
+        self.assertEqual(self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': 'x'}).status_code, 400)
+        self.assertEqual(self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': self.NUEVA}).status_code, 200)
+
+    def test_contrasena_actual_incorrecta(self):
+        r = self.cambiar(actual='mal')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('password_actual', r.data)
+        self.u_ana.refresh_from_db()
+        self.assertTrue(self.u_ana.check_password('x'))
+
+    def test_valida_la_contrasena_nueva(self):
+        for debil in ('abc', '12345678', 'password', 'qwertyuiop'):
+            r = self.cambiar(nueva=debil)
+            self.assertEqual(r.status_code, 400, debil)
+            self.assertIn('password_nueva', r.data)
+
+    def test_la_nueva_debe_ser_distinta(self):
+        self.u_ana.set_password(self.NUEVA)
+        self.u_ana.save()
+        self.client.login(username='ana', password=self.NUEVA)
+        r = self.cambiar(actual=self.NUEVA, nueva=self.NUEVA)
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('distinta', r.data['password_nueva'][0])
+
+    def test_cierra_las_otras_sesiones(self):
+        otra = self.client_class()
+        otra.login(username='ana', password='x')
+        self.assertEqual(otra.get('/api/auth/me/').status_code, 200)
+
+        self.cambiar()
+        self.assertEqual(otra.get('/api/auth/me/').status_code, 403)
+
+    def test_requiere_sesion(self):
+        self.client.logout()
+        self.assertEqual(self.cambiar().status_code, 403)
+
+    def test_exige_csrf(self):
+        client = Client(enforce_csrf_checks=True)
+        client.login(username='ana', password='x')
+        r = client.post(self.URL, {'password_actual': 'x', 'password_nueva': self.NUEVA})
+        self.assertEqual(r.status_code, 403)
+
+    def test_limite_de_intentos(self):
+        for _ in range(5):
+            self.cambiar(actual='mal')
+        self.assertEqual(self.cambiar().status_code, 429)
+
+
+class PasswordTemporalTests(BaseAuthTest):
+    def test_el_alta_obliga_a_cambiar_la_contrasena_temporal(self):
+        self.client.force_authenticate(self.staff)
+        r = self.client.post('/api/estudiantes/alta/', {
+            'nombre': 'Carla', 'apellido': 'C', 'email': 'carla@x.com', 'matricula': 'A100',
+            'nivel_educativo': 'licenciatura', 'programa': 'p', 'periodo_actual': '2026-2',
+        })
+        self.assertEqual(r.status_code, 201)
+        temporal = r.data['password_temporal']
+        self.client.force_authenticate(None)
+
+        r = self.client.post('/api/auth/login/', {'usuario': 'A100', 'password': temporal})
+        self.assertTrue(r.data['debe_cambiar_password'])
+        r = self.client.post('/api/auth/cambiar-password/', {'password_actual': temporal, 'password_nueva': 'Tortuga-Azul-2026'})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data['debe_cambiar_password'])
+        self.assertFalse(self.client.get('/api/auth/me/').data['debe_cambiar_password'])
+
+    def test_las_cuentas_existentes_no_quedan_obligadas(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertFalse(self.client.get('/api/auth/me/').data['debe_cambiar_password'])

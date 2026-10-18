@@ -9,6 +9,7 @@ from django.test import override_settings
 from academico import archivos
 from academico.models import ArchivoContenido, ContenidoMateria, ControlEscolar, Materia
 from cuentas.tests import BaseAuthTest
+from estudiantes.models import Estudiante
 from perfiles.models import PerfilEstudiante
 
 
@@ -327,3 +328,91 @@ class AdjuntosTests(ContenidoBase):
         archivo_id = self.subir(contenido, 'a.pdf', PDF).data['id']
         self.client.force_authenticate(self.u_ana)
         self.assertEqual(self.client.delete(f'/api/archivos-contenido/{archivo_id}/').status_code, 403)
+
+
+class ReportesTests(BaseAuthTest):
+    def setUp(self):
+        super().setUp()
+        self.materia = self.foro.clase.materia  # Álgebra, del curso de self.profe
+        self.calculo = Materia.objects.create(nombre='Cálculo', codigo='CAL', creditos=5, nivel=2, descripcion='', curso=self.curso)
+        PerfilEstudiante.objects.create(estudiante=self.ana, nivel_educativo='licenciatura', programa='Ingeniería',
+                                        periodo_actual='2026-10', materias_totales=10)
+        crear = ControlEscolar.objects.create
+        crear(estudiante=self.ana, materia=self.materia, periodo='2026-9', estado='reprobado', calificacion=5)
+        crear(estudiante=self.ana, materia=self.materia, periodo='2026-10', estado='aprobado', calificacion=9)
+        crear(estudiante=self.ana, materia=self.calculo, periodo='2026-10', estado='cursando', calificacion=6)
+
+    def assertPdf(self, r, nombre):
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r['Content-Type'], 'application/pdf')
+        self.assertEqual(r['Content-Disposition'], f'attachment; filename="{nombre}"')
+        self.assertEqual(r['Cache-Control'], 'no-store')
+        self.assertTrue(r.content.startswith(b'%PDF'))
+
+    # ---------- Kardex ----------
+
+    def test_datos_del_kardex(self):
+        from academico.reportes import datos_kardex
+        datos = datos_kardex(self.ana)
+        # Periodos en orden numérico: 2026-9 antes que 2026-10
+        self.assertEqual([fila[0] for fila in datos['filas']], ['2026-9', '2026-10', '2026-10'])
+        self.assertEqual(datos['filas'][0][4:], ['5.0', 'Reprobado'])
+        # Promedio: solo el último intento final de Álgebra (9); Cálculo sigue en curso
+        self.assertEqual(datos['resumen'], {'promedio': 9, 'aprobadas': 1, 'creditos': 3, 'materias_totales': 10})
+        self.assertEqual((datos['programa'], datos['nivel']), ('Ingeniería', 'Carrera Profesional'))
+
+    def test_alumno_descarga_su_kardex(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertPdf(self.client.get(f'/api/estudiantes/{self.ana.id}/kardex/'), 'kardex-1.pdf')
+
+    def test_alumno_no_descarga_el_kardex_de_otro(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertEqual(self.client.get(f'/api/estudiantes/{self.beto.id}/kardex/').status_code, 404)
+
+    def test_staff_descarga_cualquier_kardex_y_el_profesor_no(self):
+        self.client.force_authenticate(self.staff)
+        self.assertPdf(self.client.get(f'/api/estudiantes/{self.beto.id}/kardex/'), 'kardex-2.pdf')  # sin historial ni perfil
+        self.client.force_authenticate(self.profe)
+        self.assertEqual(self.client.get(f'/api/estudiantes/{self.ana.id}/kardex/').status_code, 403)
+
+    def test_caracteres_especiales_no_rompen_el_pdf(self):
+        Estudiante.objects.filter(pk=self.ana.pk).update(nombre='<b>Ana & "Ñoño"</b>')
+        Materia.objects.filter(pk=self.calculo.pk).update(nombre='Cálculo <diferencial> & integral ' * 5)
+        self.client.force_authenticate(self.u_ana)
+        self.assertPdf(self.client.get(f'/api/estudiantes/{self.ana.id}/kardex/'), 'kardex-1.pdf')
+
+    # ---------- Reporte de grupo ----------
+
+    def test_datos_del_reporte_de_grupo(self):
+        from academico.reportes import datos_reporte_grupo
+        self.curso.estudiantes.add(self.beto)
+        ControlEscolar.objects.create(estudiante=self.beto, materia=self.calculo, periodo='2026-10', estado='aprobado', calificacion=8)
+        datos = datos_reporte_grupo(self.calculo, '2026-10')
+        # Orden por apellido: A (Ana) y luego B (Beto)
+        self.assertEqual([fila[1] for fila in datos['filas']], ['1', '2'])
+        self.assertEqual((datos['profesor'], datos['periodo']), ('profe', '2026-10'))
+        # El promedio del grupo solo toma calificaciones finales (Ana sigue cursando)
+        self.assertEqual(datos['resumen'], {'alumnos': 2, 'cursando': 1, 'aprobado': 1, 'reprobado': 0, 'baja': 0, 'promedio': 8})
+
+    def test_profesor_descarga_el_reporte_de_su_materia(self):
+        self.client.force_authenticate(self.profe)
+        r = self.client.get(f'/api/materias/{self.materia.id}/reporte_grupo/?periodo=2026-10')
+        self.assertPdf(r, 'grupo-ALG-2026-10.pdf')
+
+    def test_reporte_de_periodo_sin_alumnos(self):
+        self.client.force_authenticate(self.staff)
+        r = self.client.get(f'/api/materias/{self.materia.id}/reporte_grupo/?periodo=2020-1')
+        self.assertPdf(r, 'grupo-ALG-2020-1.pdf')
+
+    def test_reporte_de_grupo_permisos(self):
+        url = f'/api/materias/{self.materia.id}/reporte_grupo/?periodo=2026-10'
+        self.client.force_authenticate(self.otro_profe)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_authenticate(self.u_ana)
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_reporte_de_grupo_exige_periodo_valido(self):
+        self.client.force_authenticate(self.profe)
+        for periodo in ('', 'otoño', '2026'):
+            r = self.client.get(f'/api/materias/{self.materia.id}/reporte_grupo/?periodo={periodo}')
+            self.assertEqual(r.status_code, 400, periodo)

@@ -1,4 +1,6 @@
-from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth import authenticate, login, logout, update_session_auth_hash
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect, ensure_csrf_cookie
 from rest_framework.permissions import AllowAny
@@ -8,6 +10,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 
 from estudiantes.serializers import EstudianteSerializer
+from .models import debe_cambiar_password
 from .roles import dado_de_baja, estudiante_de, rol_de
 
 
@@ -19,6 +22,7 @@ def datos_usuario(user):
         'nombre': user.get_full_name() or user.username,
         'rol': rol_de(user),
         'estudiante': EstudianteSerializer(estudiante).data if estudiante else None,
+        'debe_cambiar_password': debe_cambiar_password(user),
     }
 
 
@@ -67,3 +71,35 @@ class LogoutView(APIView):
 class MeView(APIView):
     def get(self, request):
         return Response(datos_usuario(request.user))
+
+
+class CambiarPasswordView(APIView):
+    """El usuario de la sesión cambia su contraseña escribiendo la actual."""
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'cambiar_password'  # limita adivinar la contraseña actual con una sesión robada
+
+    def post(self, request):
+        user = request.user
+        actual = request.data.get('password_actual', '')
+        nueva = request.data.get('password_nueva', '')
+
+        if not user.check_password(actual):
+            return Response({'password_actual': ['La contraseña actual no es correcta.']},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if nueva == actual:
+            return Response({'password_nueva': ['La nueva contraseña debe ser distinta de la actual.']},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            validate_password(nueva, user)  # longitud mínima, no parecida al usuario, no común, no solo números
+        except ValidationError as error:
+            return Response({'password_nueva': error.messages}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(nueva)
+        user.save(update_fields=['password'])
+        # Conserva esta sesión; las demás sesiones abiertas de la cuenta dejan de valer
+        update_session_auth_hash(request, user)
+        estado = getattr(user, 'estado_cuenta', None)
+        if estado and estado.debe_cambiar_password:
+            estado.debe_cambiar_password = False
+            estado.save(update_fields=['debe_cambiar_password'])
+        return Response(datos_usuario(user))

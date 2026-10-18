@@ -3,6 +3,7 @@ import secrets
 from django.contrib.auth.models import User
 from django.db import transaction
 from rest_framework import serializers
+from cuentas.models import EstadoCuenta
 from perfiles.models import PerfilEstudiante
 from .models import Estudiante
 
@@ -51,6 +52,8 @@ class AltaEstudianteSerializer(serializers.ModelSerializer):
             last_name=datos['apellido'],
             email=datos['email'],
         )
+        # La contraseña temporal la conoce quien hizo el alta: el alumno debe cambiarla al entrar
+        EstadoCuenta.objects.create(usuario=usuario, debe_cambiar_password=True)
         estudiante = Estudiante.objects.create(usuario=usuario, **datos)
         PerfilEstudiante.objects.create(estudiante=estudiante, **datos_perfil)
         return estudiante

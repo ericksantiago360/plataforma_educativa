@@ -113,7 +113,8 @@ Abre http://localhost: te llevará a la página de inicio de sesión.
 | `/api/auth/csrf/` | GET | Entrega la cookie `csrftoken` |
 | `/api/auth/login/` | POST | `{usuario, password}` → inicia sesión (máx. 5 intentos por minuto por IP) |
 | `/api/auth/logout/` | POST | Cierra la sesión |
-| `/api/auth/me/` | GET | Usuario actual: `{id, usuario, nombre, rol, estudiante}` |
+| `/api/auth/me/` | GET | Usuario actual: `{id, usuario, nombre, rol, estudiante, debe_cambiar_password}` |
+| `/api/auth/cambiar-password/` | POST | `{password_actual, password_nueva}` → cambia la contraseña con las reglas de Django (máx. 5 intentos por minuto); conserva la sesión actual y cierra las demás |
 
 Las peticiones `POST`, `PUT`, `PATCH` y `DELETE` deben enviar el header `X-CSRFToken` con el valor de la cookie `csrftoken` (`frontend/js/auth.js` lo hace con la función `api()`).
 
@@ -127,11 +128,20 @@ Las peticiones `POST`, `PUT`, `PATCH` y `DELETE` deben enviar el header `X-CSRFT
 | perfiles | `perfiles/`, `tutores/`, `asignaciones-tutor/` |
 | servicios | `biblioteca/`, `mesa-ayuda/`, `calendario/`, `idiomas/` |
 | academico | `materias/`, `clases/`, `foros/`, `mensajes-foro/`, `control-escolar/` |
+| pagos | `conceptos-pago/`, `cargos/`, `pagos/` |
 
 Filtros y acciones extra:
 - `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
 - `calendario/?proximos=1` omite los eventos que ya terminaron.
 - `POST idiomas/<id>/inscribir/` y `POST idiomas/<id>/cancelar/` inscriben o dan de baja al estudiante de la sesión (respetando el cupo).
+- `GET estudiantes/<id>/kardex/` descarga en PDF el historial completo con promedio y créditos aprobados (el propio estudiante o el staff).
+- `GET materias/<id>/reporte_grupo/?periodo=AAAA-N` descarga en PDF las calificaciones del grupo en ese periodo (el profesor de la materia o el staff).
+- Pagos (registro interno; el staff funciona como caja):
+  - `POST cargos/` (staff) crea un cargo a un alumno desde el catálogo; `POST cargos/masivo/` con `{concepto, periodo, fecha_limite}` lo genera a todos los activos que aún no lo tengan.
+  - `POST cargos/<id>/pagar/` (staff) con `{monto, metodo, referencia}` registra un pago (parcial o total, nunca más que el saldo); `POST cargos/<id>/cancelar/` cancela un cargo sin pagos.
+  - `POST cargos/solicitar_tramite/` con `{concepto}`: el estudiante pide un trámite del catálogo y se le genera el cargo.
+  - `POST pagos/<id>/anular/` (staff) con `{motivo}` anula un pago (no se borran); `GET pagos/<id>/recibo/` descarga el recibo en PDF.
+  - Inscribirse a un curso de idiomas con costo genera su cargo; cancelar la inscripción lo cancela si aún no tiene pagos.
 - `POST tareas/<id>/entregar/` (multipart, campo `archivo`) sube un archivo a la entrega del estudiante de la sesión y la marca completada. Se acepta después del vencimiento, marcada como tarde.
 - `GET tareas/<id>/entregas/` (profesor del curso y staff) lista a cada alumno inscrito con su estado y sus archivos.
 - `GET archivos-entrega/<id>/descargar/` descarga un archivo de entrega (el alumno, el profesor del curso o el staff); `DELETE archivos-entrega/<id>/` lo quita (solo el alumno o el staff).
@@ -240,6 +250,35 @@ El avance de cada alumno en una tarea. Se crea la primera vez que el alumno camb
 - subido
 ```
 Mismos formatos y límites que los adjuntos de materias, hasta 10 archivos por entrega.
+
+### Tabla: **ConceptoPago**
+```
+- id (PK)
+- nombre
+- tipo (colegiatura/inscripcion/tramite)
+- monto
+- activo
+```
+
+### Tabla: **Cargo**
+```
+- id (PK)
+- estudiante (FK, protegido: un alumno con cargos no se borra)
+- concepto (FK, opcional) / curso_idiomas (FK, opcional)
+- descripcion, tipo, periodo, monto, fecha_limite
+- cancelado
+- creado, creado_por
+```
+Lo pagado, el saldo y el estado (pendiente/parcial/pagado/cancelado) se calculan de sus pagos no anulados.
+
+### Tabla: **Pago**
+```
+- id (PK) → folio R-000001
+- cargo (FK)
+- monto, metodo (efectivo/transferencia/deposito/tarjeta), referencia
+- fecha, registrado_por
+- anulado, motivo_anulacion, anulado_por
+```
 
 ### Tabla: **Comunicado**
 ```
@@ -360,7 +399,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 123 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 174 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluidos el bloqueo de estudiantes dados de baja y el cambio de contraseña), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, reportes en PDF, pagos (cargos, pagos parciales, anulaciones y recibos), perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -381,7 +420,7 @@ docker-compose exec db mysql -uroot -proot_password \
 | Los adjuntos responden en blanco al abrirlos por el puerto 8000 | Con `SERVIR_ARCHIVOS_CON_NGINX=True` el archivo lo envía nginx | Entra siempre por http://localhost (puerto 80) |
 | El editor de texto aparece como un cuadro simple | No cargó TinyMCE desde el CDN (sin internet) | Revisa la conexión; mientras tanto se puede escribir texto simple |
 | "Tu inscripción está dada de baja" al iniciar sesión | El estudiante tiene `activo` desmarcado (también corta las sesiones abiertas) | Si debe volver a entrar, marca `activo` en su registro de Estudiante desde el admin |
-| "Usuario o contraseña incorrectos" con una cuenta que antes funcionaba | La contraseña se cambió (por ejemplo, con "Cambiar contraseña" del panel, que no queda en el historial) | Asigna una nueva: `docker-compose exec backend python manage.py changepassword <usuario>` |
+| "Usuario o contraseña incorrectos" con una cuenta que antes funcionaba | La contraseña se cambió (por ejemplo, con "Cambiar contraseña" del campus o del admin, que no quedan en el historial) | Asigna una nueva: `docker-compose exec backend python manage.py changepassword <usuario>` |
 | "Demasiados intentos. Espera un minuto…" | Límite de 5 intentos de login por minuto **por equipo** (todas las cuentas desde la misma IP cuentan juntas) | Espera un minuto y vuelve a intentar |
 | El login falla con `CSRF cookie not set` en los logs | La página de login llevaba mucho tiempo abierta o se borraron las cookies | Recarga `login.html` antes de iniciar sesión |
 | http://localhost/admin/ muestra el campus y no el panel de Django | nginx solo reenvía `/api` al backend | Usa http://localhost:8000/admin/ |
@@ -426,7 +465,8 @@ plataforma-universitaria/
 │   ├── coordinacion/          # App Coordinación (tareas, comunicados)
 │   ├── perfiles/              # Perfil académico y tutores
 │   ├── servicios/             # Biblioteca, mesa de ayuda, calendario, idiomas
-│   ├── academico/             # Materias, contenido, clases, foros, control escolar
+│   ├── academico/             # Materias, contenido, clases, foros, control escolar, reportes PDF
+│   ├── pagos/                 # Conceptos, cargos, pagos y recibos
 │   │   └── archivos.py        # Validación de adjuntos, saneamiento de HTML y YouTube
 │   └── media/                 # Adjuntos subidos (no se versiona; lo sirve nginx tras revisar permisos)
 └── frontend/
@@ -493,16 +533,13 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 
 ### Funcionalidades Prioritarias
 1. **Entregas de tareas**
-   - Que el estudiante suba su trabajo (requiere un modelo de entregas y almacenamiento de archivos)
-   - Que el profesor califique cada entrega
+   - Que el profesor califique y comente cada entrega
 
 2. **Gestión de cuentas**
-   - Cambio de contraseña (hoy el estudiante conserva la temporal)
    - Editar materias e inscribir a un alumno individual en una materia desde la página
 
 3. **Corregir la integración con Zoom**
    - Firma del Meeting SDK
-   - Que solo el profesor del curso pueda iniciar y terminar clases
    - No exponer la contraseña de la clase en la API
 
 4. **Notificaciones**
@@ -511,13 +548,12 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
    - Alertas de tareas
 
 5. **Reportes y Exportación**
-   - Generar PDF de boletas
    - Exportar datos a Excel
    - Certificados digitales
 
 ### Funcionalidades Secundarias
 - Chat en tiempo real (WebSockets)
-- Sistema de pagos
+- Pago en línea (Stripe o Mercado Pago) sobre el registro interno de pagos
 - App móvil (React Native)
 - Módulo de asistencia
 - Gamificación (logros, badges)
@@ -576,15 +612,16 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - [x] Captura de calificaciones con recálculo del perfil
 - [x] Materias e inscripción del grupo por periodo
 - [x] Contenido de materias con texto, tablas, adjuntos, imágenes y videos
+- [x] Entregas de tareas con archivos
+- [x] Cambio de contraseña (obligatorio para la contraseña temporal del alta)
+- [x] Permisos por rol en las clases de Zoom
+- [x] Reportes en PDF (kardex y reporte de grupo)
+- [x] Sistema de pagos (cargos, pagos en caja y recibos en PDF)
 
 ### Pendientes 🔄
-- [ ] Entregas de tareas con archivos
-- [ ] Cambio de contraseña
 - [ ] Corregir integración con Zoom
 - [ ] Notificaciones por email
-- [ ] Reportes en PDF
 - [ ] Chat en tiempo real
-- [ ] Sistema de pagos
 - [ ] App móvil
 
 ---

@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     'servicios',
     'academico',
     'cuentas',
+    'pagos',
 ]
 
 MIDDLEWARE = [
@@ -103,6 +104,7 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_THROTTLE_RATES': {
         'login': '5/min',
+        'cambiar_password': '5/min',
     },
     # nginx va delante: tomar la IP del cliente de X-Forwarded-For y no la del proxy,
     # o el límite de intentos de login sería compartido por todos los usuarios

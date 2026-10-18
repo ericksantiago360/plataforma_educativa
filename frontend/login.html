@@ -146,11 +146,11 @@
                     }),
                 });
 
+                const datos = await r.json().catch(() => ({}));
                 if (r.ok) {
-                    window.location.replace('index.html');
+                    window.location.replace(datos.debe_cambiar_password ? 'cambiar-password.html' : 'index.html');
                     return;
                 }
-                const datos = await r.json().catch(() => ({}));
                 error.textContent = r.status === 429
                     ? 'Demasiados intentos. Espera un minuto e inténtalo de nuevo.'
                     : (datos.detail || 'No se pudo iniciar sesión.');

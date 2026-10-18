@@ -12,6 +12,26 @@ def clave_periodo(periodo):
     coincidencia = PERIODO.match(periodo or '')
     return tuple(int(parte) for parte in coincidencia.groups()) if coincidencia else (0, 0)
 
+
+def ultimos_intentos(registros):
+    """
+    De un historial (ControlEscolar), el último intento con calificación final (aprobado/reprobado) de cada materia.
+    Un parcial de una materia en curso o un reprobado ya recursado no cuentan.
+    """
+    ultimos = {}
+    for registro in registros:
+        if registro.estado not in ('aprobado', 'reprobado'):
+            continue
+        clave = (clave_periodo(registro.periodo), registro.pk)
+        if registro.materia_id not in ultimos or clave > ultimos[registro.materia_id][0]:
+            ultimos[registro.materia_id] = (clave, registro)
+    return [registro for _, registro in ultimos.values()]
+
+
+def promedio_de(registros):
+    calificaciones = [registro.calificacion for registro in registros if registro.calificacion is not None]
+    return round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else 0
+
 class PerfilEstudiante(models.Model):
     NIVELES_EDUCATIVOS = [
         ('preparatoria', 'Preparatoria'),
@@ -39,21 +59,10 @@ class PerfilEstudiante(models.Model):
         return f"Perfil de {self.estudiante.nombre} {self.estudiante.apellido}"
 
     def recalcular(self):
-        """
-        Actualiza materias aprobadas, progreso y promedio a partir del historial (ControlEscolar).
-        Solo cuentan calificaciones finales (aprobado/reprobado) y, si una materia se cursó varias veces,
-        solo el último intento: un parcial de una materia en curso o un reprobado ya recursado no bajan el promedio.
-        """
-        ultimos = {}
-        for registro in self.estudiante.historial_escolar.filter(estado__in=('aprobado', 'reprobado')):
-            clave = (clave_periodo(registro.periodo), registro.pk)
-            if registro.materia_id not in ultimos or clave > ultimos[registro.materia_id][0]:
-                ultimos[registro.materia_id] = (clave, registro)
-        finales = [registro for _, registro in ultimos.values()]
-
+        """Actualiza materias aprobadas, progreso y promedio a partir del historial (ControlEscolar)."""
+        finales = ultimos_intentos(self.estudiante.historial_escolar.all())
         self.materias_cursadas = sum(1 for registro in finales if registro.estado == 'aprobado')
-        calificaciones = [registro.calificacion for registro in finales if registro.calificacion is not None]
-        self.promedio = round(sum(calificaciones) / len(calificaciones), 2) if calificaciones else 0
+        self.promedio = promedio_de(finales)
         if self.materias_totales:
             self.progreso_academico = min(100, round(self.materias_cursadas * 100 / self.materias_totales))
         self.save(update_fields=['materias_cursadas', 'promedio', 'progreso_academico'])

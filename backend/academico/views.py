@@ -10,8 +10,9 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import ACCIONES_ESCRITURA, AlcancePorRolMixin, AutorDelMensaje, ProfesorEscribe, SoloStaffEscribe
-from cuentas.roles import ESTUDIANTE, es_profesor, estudiante_de, rol_de
+from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, es_profesor, estudiante_de, rol_de
 from .archivos import respuesta_de_descarga, validar_archivo
+from .reportes import datos_reporte_grupo, pdf_reporte_grupo, respuesta_pdf
 from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar, ContenidoMateria, ArchivoContenido
 from .serializers import (MateriaSerializer, ClaseEnLineaSerializer, ForoClaseSerializer, MensajeForoSerializer,
                           ControlEscolarSerializer, ContenidoMateriaSerializer, ArchivoContenidoSerializer)
@@ -44,6 +45,18 @@ class MateriaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
         ]
         ControlEscolar.objects.bulk_create(nuevos)
         return Response({'inscritos': len(nuevos), 'ya_inscritos': len(ya_inscritos)})
+
+    @action(detail=True, methods=['get'])
+    def reporte_grupo(self, request, pk=None):
+        """PDF con las calificaciones del grupo en un periodo (?periodo=AAAA-N). Para el profesor de la materia y el staff."""
+        if rol_de(request.user) not in (STAFF, PROFESOR):
+            raise PermissionDenied('Solo profesores y staff pueden descargar el reporte de grupo.')
+        materia = self.get_object()  # para el profesor, solo materias de sus cursos
+        periodo = str(request.query_params.get('periodo', '')).strip()
+        if not PERIODO_VALIDO.match(periodo):
+            return Response({'periodo': ['Usa el formato AAAA-N, por ejemplo 2026-2.']}, status=status.HTTP_400_BAD_REQUEST)
+        pdf = pdf_reporte_grupo(datos_reporte_grupo(materia, periodo))
+        return respuesta_pdf(pdf, f'grupo-{materia.codigo}-{periodo}.pdf')
 
 class ClaseEnLineaViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
     queryset = ClaseEnLinea.objects.all()
