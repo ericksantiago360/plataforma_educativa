@@ -16,6 +16,12 @@ def estudiante_de(user):
     return getattr(user, 'estudiante', None)
 
 
+def dado_de_baja(user):
+    """True si el usuario es un estudiante inactivo: ya no debe tener acceso a la plataforma."""
+    estudiante = getattr(user, 'estudiante', None)
+    return estudiante is not None and not estudiante.activo
+
+
 def rol_de(user):
     if not user.is_authenticated:
         return None

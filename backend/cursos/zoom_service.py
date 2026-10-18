@@ -5,6 +5,10 @@ from decouple import config
 
 class ZoomService:
     @staticmethod
+    def configurado():
+        return bool(config('ZOOM_SDK_KEY', default='') and config('ZOOM_SDK_SECRET', default=''))
+
+    @staticmethod
     def generate_signature(session_name, role=1):
         """
         Genera un JWT token para Zoom Video SDK

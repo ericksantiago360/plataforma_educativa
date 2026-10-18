@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 
 from django.contrib.auth.models import Group, User
+from django.core.cache import cache
 from django.test import Client
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -14,6 +15,7 @@ from servicios.models import MesaAyuda
 
 class BaseAuthTest(APITestCase):
     def setUp(self):
+        cache.clear()  # el límite de intentos de login se guarda en caché y no debe pasar de un test a otro
         grupo_profesor = Group.objects.get(name='Profesor')
 
         self.staff = User.objects.create_user('staff', password='x', is_staff=True)
@@ -222,3 +224,38 @@ class UsuarioSinRolTests(BaseAuthTest):
         self.client.force_authenticate(User.objects.create_user('nadie', password='x'))
         self.assertEqual(self.ids('/api/estudiantes/'), set())
         self.assertEqual(self.ids('/api/cursos/'), set())
+
+
+class EstudianteDadoDeBajaTests(BaseAuthTest):
+    def dar_de_baja(self, estudiante, activo=False):
+        estudiante.activo = activo
+        estudiante.save()
+
+    def test_no_inicia_sesion(self):
+        self.dar_de_baja(self.ana)
+        r = self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': 'x'})
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('dada de baja', r.data['detail'])
+        self.assertEqual(self.client.get('/api/auth/me/').status_code, 403)
+
+    def test_con_contrasena_incorrecta_no_revela_la_baja(self):
+        self.dar_de_baja(self.ana)
+        r = self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': 'mal'})
+        self.assertEqual((r.status_code, r.data['detail']), (400, 'Usuario o contraseña incorrectos.'))
+
+    def test_sesion_abierta_deja_de_servir(self):
+        # Sesión real (no force_authenticate) para pasar por la clase de autenticación
+        self.client.login(username='ana', password='x')
+        self.assertEqual(self.client.get('/api/cursos/').status_code, 200)
+
+        self.dar_de_baja(self.ana)
+        self.assertEqual(self.client.get('/api/cursos/').status_code, 403)
+        self.assertEqual(self.client.get('/api/auth/me/').status_code, 403)
+
+        self.dar_de_baja(self.ana, activo=True)
+        self.assertEqual(self.client.get('/api/cursos/').status_code, 200)
+
+    def test_la_baja_de_uno_no_afecta_a_otros(self):
+        self.dar_de_baja(self.beto)
+        r = self.client.post('/api/auth/login/', {'usuario': 'ana', 'password': 'x'})
+        self.assertEqual(r.status_code, 200)

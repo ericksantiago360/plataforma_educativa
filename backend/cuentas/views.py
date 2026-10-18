@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework import status
 
 from estudiantes.serializers import EstudianteSerializer
-from .roles import estudiante_de, rol_de
+from .roles import dado_de_baja, estudiante_de, rol_de
 
 
 def datos_usuario(user):
@@ -47,6 +47,12 @@ class LoginView(APIView):
             return Response(
                 {'detail': 'Usuario o contraseña incorrectos.'},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        # Solo se avisa después de comprobar la contraseña, para no revelar qué matrículas están de baja
+        if dado_de_baja(user):
+            return Response(
+                {'detail': 'Tu inscripción está dada de baja. Comunícate con Control Escolar.'},
+                status=status.HTTP_403_FORBIDDEN,
             )
         login(request, user)
         return Response(datos_usuario(user))

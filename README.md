@@ -334,7 +334,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 79 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`), servicios, alta de estudiantes, inscripción a cursos, tareas, materias, calificaciones y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 93 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, materias, calificaciones y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash
@@ -354,6 +354,7 @@ docker-compose exec db mysql -uroot -proot_password \
 | Un adjunto da error 413 al subirlo | Supera `client_max_body_size` de nginx (210 MB) | Usa un archivo más pequeño o un enlace de YouTube para videos largos |
 | Los adjuntos responden en blanco al abrirlos por el puerto 8000 | Con `SERVIR_ARCHIVOS_CON_NGINX=True` el archivo lo envía nginx | Entra siempre por http://localhost (puerto 80) |
 | El editor de texto aparece como un cuadro simple | No cargó TinyMCE desde el CDN (sin internet) | Revisa la conexión; mientras tanto se puede escribir texto simple |
+| "Tu inscripción está dada de baja" al iniciar sesión | El estudiante tiene `activo` desmarcado (también corta las sesiones abiertas) | Si debe volver a entrar, marca `activo` en su registro de Estudiante desde el admin |
 | "Usuario o contraseña incorrectos" con una cuenta que antes funcionaba | La contraseña se cambió (por ejemplo, con "Cambiar contraseña" del panel, que no queda en el historial) | Asigna una nueva: `docker-compose exec backend python manage.py changepassword <usuario>` |
 | "Demasiados intentos. Espera un minuto…" | Límite de 5 intentos de login por minuto **por equipo** (todas las cuentas desde la misma IP cuentan juntas) | Espera un minuto y vuelve a intentar |
 | El login falla con `CSRF cookie not set` en los logs | La página de login llevaba mucho tiempo abierta o se borraron las cookies | Recarga `login.html` antes de iniciar sesión |
