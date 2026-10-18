@@ -1,11 +1,8 @@
 import os
 import re
 
-from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.http import FileResponse, HttpResponse
-from django.utils.http import content_disposition_header
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -14,7 +11,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import ACCIONES_ESCRITURA, AlcancePorRolMixin, AutorDelMensaje, ProfesorEscribe, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, es_profesor, estudiante_de, rol_de
-from .archivos import formato_de, validar_archivo
+from .archivos import respuesta_de_descarga, validar_archivo
 from .models import Materia, ClaseEnLinea, ForoClase, MensajeForo, ControlEscolar, ContenidoMateria, ArchivoContenido
 from .serializers import (MateriaSerializer, ClaseEnLineaSerializer, ForoClaseSerializer, MensajeForoSerializer,
                           ControlEscolarSerializer, ContenidoMateriaSerializer, ArchivoContenidoSerializer)
@@ -192,20 +189,4 @@ class ArchivoContenidoViewSet(AlcancePorRolMixin, mixins.RetrieveModelMixin, mix
 
     @action(detail=True, methods=['get'])
     def descargar(self, request, pk=None):
-        adjunto = self.get_object()  # aplica los mismos permisos que ver el contenido
-        formato = formato_de(adjunto.archivo.name)
-        tipo_mime = formato[1] if formato else 'application/octet-stream'
-
-        if settings.SERVIR_ARCHIVOS_CON_NGINX:
-            # nginx envía el archivo desde una ruta interna (no accesible desde fuera) y soporta rangos (videos)
-            respuesta = HttpResponse(content_type=tipo_mime)
-            respuesta['X-Accel-Redirect'] = f'/archivos-protegidos/{adjunto.archivo.name}'
-        else:
-            respuesta = FileResponse(adjunto.archivo.open('rb'), content_type=tipo_mime)
-
-        # Imágenes, videos y PDF se muestran en el navegador; Office se descarga
-        en_linea = adjunto.tipo in ('imagen', 'video') or tipo_mime == 'application/pdf'
-        respuesta['Content-Disposition'] = content_disposition_header(not en_linea, adjunto.nombre)
-        respuesta['X-Content-Type-Options'] = 'nosniff'
-        respuesta['Cache-Control'] = 'private, max-age=3600'
-        return respuesta
+        return respuesta_de_descarga(self.get_object())  # get_object aplica los mismos permisos que ver el contenido

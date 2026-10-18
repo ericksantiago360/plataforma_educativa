@@ -3,7 +3,10 @@ import os
 import re
 
 import nh3
+from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.http import FileResponse, HttpResponse
+from django.utils.http import content_disposition_header
 
 MB = 1024 * 1024
 
@@ -62,6 +65,28 @@ def validar_archivo(archivo):
     if not valido:
         raise ValidationError('El contenido del archivo no corresponde a su extensión.')
     return tipo
+
+
+def respuesta_de_descarga(adjunto):
+    """
+    Respuesta para descargar un adjunto (de contenido o de entrega) ya autorizado por la vista.
+    Con SERVIR_ARCHIVOS_CON_NGINX, nginx envía el archivo desde una ruta interna y soporta rangos (videos).
+    """
+    formato = formato_de(adjunto.archivo.name)
+    tipo_mime = formato[1] if formato else 'application/octet-stream'
+
+    if settings.SERVIR_ARCHIVOS_CON_NGINX:
+        respuesta = HttpResponse(content_type=tipo_mime)
+        respuesta['X-Accel-Redirect'] = f'/archivos-protegidos/{adjunto.archivo.name}'
+    else:
+        respuesta = FileResponse(adjunto.archivo.open('rb'), content_type=tipo_mime)
+
+    # Imágenes, videos y PDF se muestran en el navegador; Office se descarga
+    en_linea = adjunto.tipo in ('imagen', 'video') or tipo_mime == 'application/pdf'
+    respuesta['Content-Disposition'] = content_disposition_header(not en_linea, adjunto.nombre)
+    respuesta['X-Content-Type-Options'] = 'nosniff'
+    respuesta['Cache-Control'] = 'private, max-age=3600'
+    return respuesta
 
 
 # HTML del editor: solo formato de texto, enlaces y tablas. Nada de scripts, estilos ni eventos.

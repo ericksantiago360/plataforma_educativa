@@ -123,7 +123,7 @@ Las peticiones `POST`, `PUT`, `PATCH` y `DELETE` deben enviar el header `X-CSRFT
 |-----|-----------|
 | estudiantes | `estudiantes/` |
 | cursos | `cursos/`, `clases-zoom/`, `participantes-clase/` |
-| coordinacion | `tareas/`, `comunicados/` |
+| coordinacion | `tareas/`, `archivos-entrega/`, `comunicados/` |
 | perfiles | `perfiles/`, `tutores/`, `asignaciones-tutor/` |
 | servicios | `biblioteca/`, `mesa-ayuda/`, `calendario/`, `idiomas/` |
 | academico | `materias/`, `clases/`, `foros/`, `mensajes-foro/`, `control-escolar/` |
@@ -132,6 +132,9 @@ Filtros y acciones extra:
 - `mensajes-foro/?foro=<id>` trae solo los mensajes de un foro.
 - `calendario/?proximos=1` omite los eventos que ya terminaron.
 - `POST idiomas/<id>/inscribir/` y `POST idiomas/<id>/cancelar/` inscriben o dan de baja al estudiante de la sesión (respetando el cupo).
+- `POST tareas/<id>/entregar/` (multipart, campo `archivo`) sube un archivo a la entrega del estudiante de la sesión y la marca completada. Se acepta después del vencimiento, marcada como tarde.
+- `GET tareas/<id>/entregas/` (profesor del curso y staff) lista a cada alumno inscrito con su estado y sus archivos.
+- `GET archivos-entrega/<id>/descargar/` descarga un archivo de entrega (el alumno, el profesor del curso o el staff); `DELETE archivos-entrega/<id>/` lo quita (solo el alumno o el staff).
 - `POST tareas/<id>/estado/` con `{"estado": "completada"}` marca el avance del estudiante de la sesión. Al listar tareas, el estudiante recibe su `estado` y profesor/staff un `resumen` del grupo.
 - `POST estudiantes/alta/` (staff) crea estudiante + cuenta (usuario = matrícula) + perfil y devuelve **una sola vez** la contraseña temporal.
 - `GET cursos/<id>/inscritos/` (profesor y staff), `POST cursos/<id>/inscribir/` y `POST cursos/<id>/quitar/` (staff) con `{estudiante}`.
@@ -221,9 +224,22 @@ La tarea es de todo el curso, también para quien se inscriba después.
 - tarea (FK)
 - estudiante (FK)
 - estado (pendiente/en_progreso/completada)
+- entregado (fecha del último archivo subido; se marca "tarde" si pasa del vencimiento)
 - actualizado
 ```
-El avance de cada alumno en una tarea. Se crea la primera vez que el alumno cambia su estado; sin registro, la tarea está pendiente para él.
+El avance de cada alumno en una tarea. Se crea la primera vez que el alumno cambia su estado o entrega; sin registro, la tarea está pendiente para él.
+
+### Tabla: **ArchivoEntrega**
+```
+- id (PK)
+- entrega (FK a EntregaTarea)
+- archivo (en media/entregas/, con nombre aleatorio)
+- nombre (original)
+- tipo (documento/imagen/video)
+- tamano
+- subido
+```
+Mismos formatos y límites que los adjuntos de materias, hasta 10 archivos por entrega.
 
 ### Tabla: **Comunicado**
 ```
@@ -344,7 +360,7 @@ docker-compose exec -T backend python manage.py shell < backend/seed_data.py
 docker-compose exec backend python manage.py test
 ```
 
-Son 112 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas y avance por alumno, comunicados, materias, calificaciones y promedio, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
+Son 123 pruebas, en el `tests.py` de cada app: autenticación y permisos (`cuentas`, incluido el bloqueo de estudiantes dados de baja), servicios, alta de estudiantes, inscripción a cursos, clases de Zoom y asistencia, tareas, avance y entrega de archivos por alumno, comunicados, materias, calificaciones y promedio, perfiles, y contenido de materias (saneamiento de HTML, validación y descarga protegida de archivos).
 
 Django crea una base temporal `test_plataforma_universitaria`. Si falla con *Access denied*, dale permiso al usuario de MySQL una sola vez:
 ```bash

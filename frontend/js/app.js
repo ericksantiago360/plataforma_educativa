@@ -1247,15 +1247,21 @@ async function loadTareas() {
                 </div>
                 <p style="margin-top: 0.5rem; white-space: pre-wrap; overflow-wrap: anywhere;">${escapeHtml(tarea.descripcion)}</p>
                 ${puedeGestionarTareas() ? `
-                    <button type="button" class="tarea-eliminar" data-tarea-id="${escapeHtml(tarea.id)}"
-                            style="${ESTILO_ACCION} color: var(--danger); margin-top: 0.75rem;">Eliminar</button>` : ''}
+                    <div style="margin-top: 0.75rem; display: flex; gap: 1rem;">
+                        <button type="button" class="tarea-ver-entregas" data-tarea-id="${escapeHtml(tarea.id)}"
+                                style="${ESTILO_ACCION}">Ver entregas (${escapeHtml(tarea.resumen.con_archivos)} con archivos)</button>
+                        <button type="button" class="tarea-eliminar" data-tarea-id="${escapeHtml(tarea.id)}"
+                                style="${ESTILO_ACCION} color: var(--danger);">Eliminar</button>
+                    </div>
+                    <div class="tarea-entregas" id="entregas-${escapeHtml(tarea.id)}" hidden></div>` : ''}
                 ${currentStudent ? `
                     <label style="display: block; margin-top: 0.75rem; font-size: 0.85rem;">Mi avance:
                         <select class="tarea-estado" data-tarea-id="${escapeHtml(tarea.id)}" style="${ESTILO_CAMPO} width: auto; margin-left: 0.5rem;">
                             ${ESTADOS_TAREA.map(([valor, nombre]) =>
                                 `<option value="${valor}"${valor === tarea.estado ? ' selected' : ''}>${nombre}</option>`).join('')}
                         </select>
-                    </label>` : ''}
+                    </label>
+                    ${htmlMiEntrega(tarea)}` : ''}
             </div>
         `;
     });
@@ -1270,6 +1276,142 @@ async function loadTareas() {
     container.querySelectorAll('.tarea-estado').forEach(selector => {
         selector.addEventListener('change', () => cambiarEstadoTarea(selector));
     });
+    container.querySelectorAll('.tarea-archivo').forEach(entrada => {
+        entrada.addEventListener('change', () => entregarArchivos(entrada));
+    });
+    container.querySelectorAll('.entrega-quitar').forEach(boton => {
+        boton.addEventListener('click', () => quitarArchivoEntrega(boton.dataset.archivoId));
+    });
+    container.querySelectorAll('.tarea-ver-entregas').forEach(boton => {
+        boton.addEventListener('click', () => verEntregas(boton.dataset.tareaId));
+    });
+}
+
+function fechaCorta(iso) {
+    return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function htmlArchivosEntrega(archivos, conQuitar) {
+    return archivos.map(archivo => `
+        <div style="display: flex; justify-content: space-between; gap: 1rem; padding: 0.25rem 0; font-size: 0.85rem;">
+            <a href="${escapeHtml(archivo.url)}" target="_blank" rel="noopener" style="overflow-wrap: anywhere;">
+                ${ICONOS_DOCUMENTO[extensionDe(archivo.nombre)] || (archivo.tipo === 'imagen' ? '🖼️' : archivo.tipo === 'video' ? '🎬' : '📄')}
+                ${escapeHtml(archivo.nombre)}
+            </a>
+            <span style="color: var(--gray-700); white-space: nowrap;">${escapeHtml(formatoTamano(archivo.tamano))}
+                ${conQuitar ? `<button type="button" class="entrega-quitar" data-archivo-id="${escapeHtml(archivo.id)}"
+                        style="${ESTILO_ACCION} color: var(--danger); margin-left: 0.5rem;">Quitar</button>` : ''}
+            </span>
+        </div>
+    `).join('');
+}
+
+function etiquetaEntrega(entrega) {
+    if (!entrega.entregado) return '';
+    return `Entregada el ${escapeHtml(fechaCorta(entrega.entregado))}`
+        + (entrega.tarde ? ' · <strong style="color: var(--danger);">tarde</strong>' : '');
+}
+
+// Bloque de entrega del alumno: lo que ya subió y el selector para subir más
+function htmlMiEntrega(tarea) {
+    const aceptados = Object.keys(FORMATOS_ADJUNTO).map(e => `.${e}`).join(',');
+    return `
+        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--gray-200);">
+            <div style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem;">Mi entrega</div>
+            ${tarea.entregado ? `<p style="font-size: 0.85rem; margin-bottom: 0.25rem;">${etiquetaEntrega(tarea)}</p>` : ''}
+            ${htmlArchivosEntrega(tarea.archivos, true)}
+            <label style="display: block; margin-top: 0.5rem; font-size: 0.85rem;">
+                ${tarea.archivos.length ? 'Agregar archivos' : 'Subir archivos para entregar'}
+                <input type="file" multiple class="tarea-archivo" data-tarea-id="${escapeHtml(tarea.id)}" accept="${aceptados}"
+                       style="${ESTILO_CAMPO} margin-top: 0.25rem;">
+            </label>
+            <div style="color: var(--gray-700); font-size: 0.75rem; margin-top: 0.25rem;">
+                PDF y Office (hasta ${LIMITE_ADJUNTO_MB.documento} MB) · imágenes (hasta ${LIMITE_ADJUNTO_MB.imagen} MB) · MP4 y WebM (hasta ${LIMITE_ADJUNTO_MB.video} MB)
+            </div>
+            <p class="tarea-subida" role="status" style="font-size: 0.85rem; margin-top: 0.25rem; white-space: pre-line;"></p>
+        </div>
+    `;
+}
+
+async function entregarArchivos(entrada) {
+    const archivos = Array.from(entrada.files);
+    const aviso = entrada.closest('div').querySelector('.tarea-subida');
+    const invalidos = archivos.map(a => [a, problemaDeAdjunto(a)]).filter(([, problema]) => problema);
+    if (invalidos.length) {
+        aviso.style.color = 'var(--danger)';
+        aviso.textContent = invalidos.map(([a, problema]) => `${a.name}: ${problema}`).join('\n');
+        entrada.value = '';
+        return;
+    }
+
+    entrada.disabled = true;
+    aviso.style.color = '';
+    const fallidos = [];
+    for (const [indice, archivo] of archivos.entries()) {
+        const prefijo = `Subiendo ${indice + 1} de ${archivos.length}: ${archivo.name}`;
+        aviso.textContent = prefijo + '…';
+        const resultado = await subirAdjunto(`/tareas/${encodeURIComponent(entrada.dataset.tareaId)}/entregar/`, archivo,
+            fraccion => { aviso.textContent = `${prefijo} (${Math.round(fraccion * 100)}%)`; });
+        if (!resultado.ok) fallidos.push(`${archivo.name}: ${mensajeDeError(resultado.datos, 'Error al subir')}`);
+    }
+
+    await loadTasks();
+    updateDashboard(usuarioActual);
+    await loadTareas();
+    if (fallidos.length) {
+        alert('Algunos archivos no se subieron:\n' + fallidos.join('\n'));
+    }
+}
+
+async function quitarArchivoEntrega(archivoId) {
+    if (!confirm('¿Quitar este archivo de tu entrega?')) return;
+    try {
+        const response = await api(`/archivos-entrega/${encodeURIComponent(archivoId)}/`, { method: 'DELETE' });
+        if (!response.ok) {
+            alert(mensajeDeError(await response.json().catch(() => ({})), 'No se pudo quitar el archivo.'));
+            return;
+        }
+    } catch {
+        alert('No hay conexión con el servidor.');
+        return;
+    }
+    await loadTareas();
+}
+
+// Profesor y staff: lista de alumnos inscritos con su avance y archivos (se abre y cierra con el mismo botón)
+async function verEntregas(tareaId) {
+    const panel = document.getElementById(`entregas-${tareaId}`);
+    if (!panel.hidden) {
+        panel.hidden = true;
+        return;
+    }
+    panel.hidden = false;
+    panel.innerHTML = '<p style="margin-top: 0.75rem;">Cargando…</p>';
+
+    let filas;
+    try {
+        const response = await api(`/tareas/${encodeURIComponent(tareaId)}/entregas/`);
+        if (!response.ok) throw new Error(response.status);
+        filas = await response.json();
+    } catch (error) {
+        console.error('Error cargando entregas:', error);
+        panel.innerHTML = '<p style="margin-top: 0.75rem; color: var(--danger);">No se pudieron cargar las entregas.</p>';
+        return;
+    }
+
+    panel.innerHTML = filas.length === 0
+        ? '<p style="margin-top: 0.75rem;">No hay alumnos inscritos.</p>'
+        : filas.map(fila => `
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--gray-200);">
+                <div style="display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+                    <strong>${escapeHtml(fila.nombre)} <span style="font-weight: normal; color: var(--gray-700); font-size: 0.85rem;">${escapeHtml(fila.matricula)}</span></strong>
+                    <span class="clase-badge ${BADGES_TAREA[fila.estado] || 'badge-neutral'}">${escapeHtml(fila.estado_nombre)}</span>
+                </div>
+                ${fila.entregado ? `<p style="font-size: 0.85rem;">${etiquetaEntrega(fila)}</p>` : ''}
+                ${fila.archivos.length ? htmlArchivosEntrega(fila.archivos, false)
+                                       : '<p style="font-size: 0.85rem; color: var(--gray-700);">Sin archivos.</p>'}
+            </div>
+        `).join('');
 }
 
 async function cambiarEstadoTarea(selector) {
@@ -2107,10 +2249,11 @@ function obtenerCuerpo() {
 }
 
 // Subida con XMLHttpRequest para poder mostrar el progreso (fetch no lo informa)
-function subirAdjunto(contenidoId, archivo, alProgresar) {
+// ruta: endpoint de la API que recibe el campo "archivo" (adjunto de contenido o entrega de tarea)
+function subirAdjunto(ruta, archivo, alProgresar) {
     return new Promise(resolve => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `/api/contenidos/${encodeURIComponent(contenidoId)}/subir_archivo/`);
+        xhr.open('POST', '/api' + ruta);
         xhr.setRequestHeader('X-CSRFToken', getCookie('csrftoken'));
         xhr.upload.onprogress = evento => {
             if (evento.lengthComputable) alProgresar(evento.loaded / evento.total);
@@ -2183,7 +2326,7 @@ async function guardarContenido(evento, contenido) {
         const estado = fila.querySelector('.adjunto-estado');
         estado.textContent = 'Subiendo…';
         boton.textContent = `Subiendo ${indice + 1} de ${archivos.length}…`;
-        const resultado = await subirAdjunto(guardado.id, archivo, fraccion => { barra.style.width = `${Math.round(fraccion * 100)}%`; });
+        const resultado = await subirAdjunto(`/contenidos/${encodeURIComponent(guardado.id)}/subir_archivo/`, archivo, fraccion => { barra.style.width = `${Math.round(fraccion * 100)}%`; });
         if (resultado.ok) {
             barra.style.width = '100%';
             estado.textContent = '✅ Subido';

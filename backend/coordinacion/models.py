@@ -1,4 +1,10 @@
+import os
+import uuid
+
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+from academico.models import ArchivoContenido
 from estudiantes.models import Estudiante
 from cursos.models import Curso
 
@@ -28,6 +34,7 @@ class EntregaTarea(models.Model):
     tarea = models.ForeignKey(Tarea, on_delete=models.CASCADE, related_name='entregas')
     estudiante = models.ForeignKey(Estudiante, on_delete=models.CASCADE, related_name='entregas_tareas')
     estado = models.CharField(max_length=20, choices=ESTADOS, default='pendiente')
+    entregado = models.DateTimeField(null=True, blank=True)  # último archivo subido
     actualizado = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -37,6 +44,36 @@ class EntregaTarea(models.Model):
 
     def __str__(self):
         return f"{self.estudiante.nombre} - {self.tarea.titulo} ({self.get_estado_display()})"
+
+    @property
+    def tarde(self):
+        return self.entregado is not None and self.entregado > self.tarea.fecha_vencimiento
+
+def ruta_archivo_entrega(instancia, nombre_original):
+    # Nombre aleatorio, como en los adjuntos de materias: no revela ni permite adivinar el nombre original
+    extension = os.path.splitext(nombre_original)[1].lower()
+    return f'entregas/tarea_{instancia.entrega.tarea_id}/{uuid.uuid4().hex}{extension}'
+
+class ArchivoEntrega(models.Model):
+    entrega = models.ForeignKey(EntregaTarea, on_delete=models.CASCADE, related_name='archivos')
+    archivo = models.FileField(upload_to=ruta_archivo_entrega)
+    nombre = models.CharField(max_length=255)  # nombre original, para mostrarlo y descargarlo
+    tipo = models.CharField(max_length=10, choices=ArchivoContenido.TIPOS)
+    tamano = models.PositiveBigIntegerField()
+    subido = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['subido']
+        verbose_name = 'Archivo de entrega'
+        verbose_name_plural = 'Archivos de entregas'
+
+    def __str__(self):
+        return self.nombre
+
+@receiver(post_delete, sender=ArchivoEntrega)
+def borrar_archivo_del_disco(sender, instance, **kwargs):
+    # También se ejecuta al borrar la entrega, la tarea o el curso (borrado en cascada)
+    instance.archivo.delete(save=False)
 
 class Comunicado(models.Model):
     titulo = models.CharField(max_length=200)
