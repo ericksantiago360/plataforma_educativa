@@ -100,6 +100,8 @@ class CentroIdiomas(models.Model):
     cupo_maximo = models.IntegerField(default=25)
     estudiantes_inscritos = models.ManyToManyField(Estudiante, related_name='cursos_idiomas', blank=True)
     fecha_inicio = models.DateField()
+    horario = models.CharField(max_length=200, blank=True)  # texto libre: "Lunes y miércoles, 18:00 a 20:00"
+    lugar = models.CharField(max_length=200, blank=True)    # salón o enlace de la sesión
     activo = models.BooleanField(default=True)
     
     class Meta:
@@ -111,3 +113,39 @@ class CentroIdiomas(models.Model):
     @property
     def cupos_disponibles(self):
         return self.cupo_maximo - self.estudiantes_inscritos.count()
+
+
+class ClaseIdiomas(models.Model):
+    """Una sesión programada de un curso de idiomas. La ven los alumnos inscritos; la administra el staff."""
+    curso = models.ForeignKey(CentroIdiomas, on_delete=models.CASCADE, related_name='clases')
+    titulo = models.CharField(max_length=200)
+    fecha_hora = models.DateTimeField()
+    duracion_minutos = models.PositiveIntegerField(default=60)
+    enlace = models.URLField(blank=True)  # videollamada, si la sesión es en línea
+    notas = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['fecha_hora']
+        verbose_name = 'Clase de idiomas'
+        verbose_name_plural = 'Clases de idiomas'
+
+    def __str__(self):
+        return f"{self.curso.nombre_curso} - {self.titulo}"
+
+
+class MaterialIdiomas(models.Model):
+    """Material de estudio de un curso de idiomas (lectura, audio, ejercicios): un enlace con su descripción."""
+    curso = models.ForeignKey(CentroIdiomas, on_delete=models.CASCADE, related_name='materiales')
+    titulo = models.CharField(max_length=200)
+    descripcion = models.TextField(blank=True)
+    enlace = models.URLField(blank=True)
+    publicado = models.BooleanField(default=True)  # un borrador solo lo ve el staff
+    orden = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['orden', 'id']
+        verbose_name = 'Material de idiomas'
+        verbose_name_plural = 'Materiales de idiomas'
+
+    def __str__(self):
+        return f"{self.curso.nombre_curso} - {self.titulo}"

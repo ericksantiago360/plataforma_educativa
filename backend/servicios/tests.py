@@ -3,7 +3,8 @@ from datetime import date, timedelta
 from django.utils import timezone
 
 from cuentas.tests import BaseAuthTest
-from servicios.models import BibliotecaDigital, CentroIdiomas, EventoCalendario, MesaAyuda
+from pagos.models import Cargo, Pago
+from servicios.models import BibliotecaDigital, CentroIdiomas, ClaseIdiomas, EventoCalendario, MaterialIdiomas, MesaAyuda
 
 
 class BibliotecaTests(BaseAuthTest):
@@ -93,6 +94,99 @@ class IdiomasTests(BaseAuthTest):
         self.assertNotIn('estudiantes_inscritos', self.client.get(f'/api/idiomas/{self.ingles.id}/').data)
         self.client.force_authenticate(self.staff)
         self.assertEqual(self.client.get(f'/api/idiomas/{self.ingles.id}/').data['estudiantes_inscritos'], [self.beto.id])
+
+
+class IdiomasCursoTests(BaseAuthTest):
+    """Lo que recibe el alumno al inscribirse: clases, materiales y el estado de su pago."""
+
+    def setUp(self):
+        super().setUp()
+        self.ingles = CentroIdiomas.objects.create(idioma='ingles', nivel='basico', nombre_curso='Inglés I',
+                                                   descripcion='', duracion_semanas=8, precio=1500, instructor='x',
+                                                   cupo_maximo=5, fecha_inicio=date.today() + timedelta(days=10),
+                                                   horario='Lun y mié 18:00', lugar='Salón 3')
+        ClaseIdiomas.objects.create(curso=self.ingles, titulo='Clase 1', fecha_hora=timezone.now() + timedelta(days=10))
+        self.visible = MaterialIdiomas.objects.create(curso=self.ingles, titulo='Vocabulario', enlace='https://x.com/v')
+        self.borrador = MaterialIdiomas.objects.create(curso=self.ingles, titulo='Borrador', publicado=False)
+        self.url = f'/api/idiomas/{self.ingles.id}/mi_curso/'
+
+    def inscribir_a_ana(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertEqual(self.client.post(f'/api/idiomas/{self.ingles.id}/inscribir/').status_code, 200)
+
+    def test_no_inscrito_no_ve_el_curso(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_inscrito_ve_clases_materiales_publicados_y_su_cargo(self):
+        self.inscribir_a_ana()
+        r = self.client.get(self.url)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([c['titulo'] for c in r.data['clases']], ['Clase 1'])
+        self.assertEqual([m['titulo'] for m in r.data['materiales']], ['Vocabulario'])  # sin el borrador
+        self.assertEqual((r.data['cargo']['estado'], r.data['cargo']['saldo']), ('pendiente', 1500))
+        self.assertEqual(r.data['curso']['horario'], 'Lun y mié 18:00')
+
+    def test_el_cargo_refleja_los_pagos(self):
+        self.inscribir_a_ana()
+        cargo = Cargo.objects.get(curso_idiomas=self.ingles, estudiante=self.ana)
+        Pago.objects.create(cargo=cargo, monto=500, metodo='efectivo')
+        cargo_api = self.client.get(self.url).data['cargo']
+        self.assertEqual((cargo_api['estado'], cargo_api['pagado'], cargo_api['saldo']), ('parcial', 500, 1000))
+
+    def test_otro_inscrito_no_ve_el_cargo_de_ana(self):
+        self.inscribir_a_ana()
+        self.client.force_authenticate(self.u_beto)
+        self.client.post(f'/api/idiomas/{self.ingles.id}/inscribir/')
+        self.assertEqual(self.client.get(self.url).data['cargo']['saldo'], 1500)  # el suyo, no el de ana
+        self.assertEqual(Cargo.objects.filter(curso_idiomas=self.ingles).count(), 2)
+
+    def test_staff_ve_los_borradores_y_no_tiene_cargo(self):
+        self.client.force_authenticate(self.staff)
+        r = self.client.get(self.url)
+        self.assertEqual({m['titulo'] for m in r.data['materiales']}, {'Vocabulario', 'Borrador'})
+        self.assertIsNone(r.data['cargo'])
+
+    def test_inscritos_solo_para_staff_con_estado_de_pago(self):
+        self.inscribir_a_ana()
+        self.assertEqual(self.client.get(f'/api/idiomas/{self.ingles.id}/inscritos/').status_code, 403)
+        self.client.force_authenticate(self.staff)
+        r = self.client.get(f'/api/idiomas/{self.ingles.id}/inscritos/')
+        self.assertEqual([(i['matricula'], i['cargo']['estado']) for i in r.data], [('1', 'pendiente')])
+
+    def test_no_se_inscribe_a_un_curso_que_ya_inicio(self):
+        self.ingles.fecha_inicio = date.today() - timedelta(days=1)
+        self.ingles.save()
+        self.client.force_authenticate(self.u_ana)
+        r = self.client.post(f'/api/idiomas/{self.ingles.id}/inscribir/')
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(self.ingles.estudiantes_inscritos.filter(pk=self.ana.pk).exists())
+        self.assertFalse(Cargo.objects.filter(curso_idiomas=self.ingles).exists())
+
+    def test_quien_ya_estaba_inscrito_sigue_pudiendo_reinscribir_sin_error(self):
+        self.inscribir_a_ana()
+        self.ingles.fecha_inicio = date.today() - timedelta(days=1)
+        self.ingles.save()
+        self.assertEqual(self.client.post(f'/api/idiomas/{self.ingles.id}/inscribir/').status_code, 200)
+
+    def test_alumno_solo_lee_clases_y_materiales_de_sus_cursos(self):
+        self.client.force_authenticate(self.u_ana)
+        self.assertEqual(self.ids('/api/idiomas-clases/'), set())  # aún no inscrita
+        self.inscribir_a_ana()
+        self.assertEqual(len(self.client.get('/api/idiomas-clases/').data['results']), 1)
+        self.assertEqual({m['titulo'] for m in self.client.get('/api/idiomas-materiales/').data['results']}, {'Vocabulario'})
+
+    def test_alumno_no_escribe_clases_ni_materiales(self):
+        self.inscribir_a_ana()
+        r = self.client.post('/api/idiomas-materiales/', {'curso': self.ingles.id, 'titulo': 'x'})
+        self.assertEqual(r.status_code, 403)
+
+    def test_staff_crea_una_clase(self):
+        self.client.force_authenticate(self.staff)
+        r = self.client.post('/api/idiomas-clases/', {'curso': self.ingles.id, 'titulo': 'Clase 2',
+                                                      'fecha_hora': (timezone.now() + timedelta(days=17)).isoformat(),
+                                                      'duracion_minutos': 90})
+        self.assertEqual(r.status_code, 201)
 
 
 class MesaAyudaTests(BaseAuthTest):

@@ -1166,12 +1166,21 @@ function renderIdiomas() {
         const cupos = curso.cupos_disponibles;
 
         let accion = '';
-        if (currentStudent) {
+        const yaInicio = curso.fecha_inicio < new Date().toLocaleDateString('en-CA');  // AAAA-MM-DD en hora local
+        if (usuarioActual && usuarioActual.rol === 'staff') {
+            accion = `
+                <button type="button" class="btn btn-primary idioma-ver" data-curso-id="${escapeHtml(curso.id)}"
+                        style="margin-top: 1rem; width: 100%;">Ver inscritos y contenido</button>`;
+        } else if (currentStudent) {
             if (curso.inscrito) {
                 accion = `
                     <p style="margin-top: 1rem; color: var(--success); font-weight: 600;">✅ Estás inscrito</p>
+                    <button type="button" class="btn btn-primary idioma-ver" data-curso-id="${escapeHtml(curso.id)}"
+                            style="margin-top: 0.5rem; width: 100%;">Ver mi curso</button>
                     <button type="button" class="btn-salir idioma-accion" data-accion="cancelar" data-curso-id="${escapeHtml(curso.id)}"
                             style="margin-top: 0.5rem; width: 100%;">Cancelar inscripción</button>`;
+            } else if (yaInicio) {
+                accion = '<button type="button" class="btn btn-primary" disabled style="margin-top: 1rem; width: 100%; opacity: 0.6;">Inscripciones cerradas</button>';
             } else if (cupos <= 0) {
                 accion = '<button type="button" class="btn btn-primary" disabled style="margin-top: 1rem; width: 100%; opacity: 0.6;">Sin cupo</button>';
             } else {
@@ -1193,6 +1202,7 @@ function renderIdiomas() {
                     <p style="margin-top: 0.5rem;">${escapeHtml(curso.descripcion)}</p>
                     <p style="margin-top: 0.5rem;"><strong>Instructor:</strong> ${escapeHtml(curso.instructor)}</p>
                     <p><strong>Inicio:</strong> ${escapeHtml(formatearDia(curso.fecha_inicio))} · ${escapeHtml(curso.duracion_semanas)} semanas</p>
+                    ${curso.horario ? `<p><strong>Horario:</strong> ${escapeHtml(curso.horario)}</p>` : ''}
                     <p><strong>Costo:</strong> ${escapeHtml(formatoPrecio.format(Number(curso.precio)))}</p>
                     <p><strong>Cupos disponibles:</strong> ${escapeHtml(Math.max(cupos, 0))} de ${escapeHtml(curso.cupo_maximo)}</p>
                     ${accion}
@@ -1203,6 +1213,9 @@ function renderIdiomas() {
 
     container.querySelectorAll('.idioma-accion').forEach(boton => {
         boton.addEventListener('click', () => cambiarInscripcion(boton));
+    });
+    container.querySelectorAll('.idioma-ver').forEach(boton => {
+        boton.addEventListener('click', () => abrirCursoIdiomas(boton.dataset.cursoId));
     });
 }
 
@@ -1227,6 +1240,307 @@ async function cambiarInscripcion(boton) {
         error.textContent = 'No hay conexión con el servidor.';
     }
     boton.disabled = false;
+}
+
+// Vista de un curso de idiomas: lo que recibe el alumno inscrito (y lo que supervisa el staff)
+const ESTADOS_PAGO_IDIOMAS = {
+    pendiente: ['Pago pendiente', 'badge-scheduled'],
+    parcial: ['Pago parcial', 'badge-scheduled'],
+    pagado: ['Pagado', 'badge-completed'],
+};
+
+function etiquetaDePago(cargo) {
+    if (cargo.vencido) return ['Pago vencido', 'badge-live'];
+    return ESTADOS_PAGO_IDIOMAS[cargo.estado] || [cargo.estado, 'badge-neutral'];
+}
+
+async function abrirCursoIdiomas(cursoId) {
+    const container = document.getElementById('idiomas-contenido');
+    container.innerHTML = '<div class="card"><p>Cargando…</p></div>';
+    window.scrollTo(0, 0);
+    const esStaff = usuarioActual && usuarioActual.rol === 'staff';
+    try {
+        const respuesta = await api(`/idiomas/${encodeURIComponent(cursoId)}/mi_curso/`);
+        const datos = await respuesta.json().catch(() => ({}));
+        if (!respuesta.ok) {
+            container.innerHTML = `<div class="card"><p style="color: red;">${escapeHtml(mensajeDeError(datos, 'No se pudo abrir el curso.'))}</p>
+                <button type="button" class="btn-salir" id="idioma-volver" style="margin-top: 1rem;">← Volver al Centro de Idiomas</button></div>`;
+            document.getElementById('idioma-volver').addEventListener('click', loadIdiomas);
+            return;
+        }
+        let inscritos = null;
+        if (esStaff) {
+            const resp = await api(`/idiomas/${encodeURIComponent(cursoId)}/inscritos/`);
+            if (resp.ok) inscritos = await resp.json();
+        }
+        renderCursoIdiomas(datos, inscritos, esStaff);
+    } catch (error) {
+        console.error('Error cargando el curso de idiomas:', error);
+        errorDeCarga(container, 'el curso');
+    }
+}
+
+function renderCursoIdiomas(datos, inscritos, esStaff) {
+    const container = document.getElementById('idiomas-contenido');
+    const { curso, clases, materiales, cargo } = datos;
+    const estilo = ESTILO_IDIOMA[curso.idioma] || { bandera: '🌎', fondo: '#e0e7ff' };
+    const ahora = Date.now();
+    const proximas = clases.filter(c => new Date(c.fecha_hora).getTime() + c.duracion_minutos * 60000 >= ahora);
+    const pasadas = clases.filter(c => !proximas.includes(c));
+
+    const botonesFila = (tipo, id) => !esStaff ? '' : `
+        <div style="margin-top: 0.5rem;">
+            <button type="button" class="idioma-editar" data-tipo="${tipo}" data-id="${escapeHtml(id)}" style="${ESTILO_ACCION} color: var(--primary);">Editar</button>
+            <button type="button" class="idioma-borrar" data-tipo="${tipo}" data-id="${escapeHtml(id)}" style="${ESTILO_ACCION} color: var(--danger); margin-left: 0.75rem;">Eliminar</button>
+        </div>`;
+
+    const filaClase = (c, pasada) => {
+        const enlace = urlSegura(c.enlace);
+        return `
+            <div class="clase-item"${pasada ? ' style="opacity: 0.7;"' : ''}>
+                <div class="clase-header">
+                    <div class="clase-title">${escapeHtml(c.titulo)}</div>
+                    <div class="clase-badge ${pasada ? 'badge-neutral' : 'badge-scheduled'}">${pasada ? 'Realizada' : 'Programada'}</div>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--gray-700);">${escapeHtml(formatearFecha(c.fecha_hora))} · ${escapeHtml(c.duracion_minutos)} min</div>
+                ${c.notas ? `<p style="font-size: 0.85rem; margin-top: 0.25rem;">${escapeHtml(c.notas)}</p>` : ''}
+                ${enlace && !pasada ? `<a href="${escapeHtml(enlace)}" target="_blank" rel="noopener noreferrer" class="btn btn-primary"
+                        style="display: inline-block; margin-top: 0.5rem; text-decoration: none;">Unirme a la clase</a>` : ''}
+                ${botonesFila('clase', c.id)}
+            </div>`;
+    };
+
+    const filaMaterial = m => {
+        const enlace = urlSegura(m.enlace);
+        return `
+            <div class="clase-item">
+                <div class="clase-header">
+                    <div class="clase-title">📎 ${escapeHtml(m.titulo)}</div>
+                    ${esStaff && !m.publicado ? '<div class="clase-badge badge-neutral">Borrador</div>' : ''}
+                </div>
+                ${m.descripcion ? `<p style="font-size: 0.85rem;">${escapeHtml(m.descripcion)}</p>` : ''}
+                ${enlace ? `<a href="${escapeHtml(enlace)}" target="_blank" rel="noopener noreferrer">Abrir material</a>` : ''}
+                ${botonesFila('material', m.id)}
+            </div>`;
+    };
+
+    const bloquePago = cargo => {
+        if (!cargo) {
+            return '<p style="font-size: 0.9rem;">Este curso no tiene costo o aún no se genera tu cargo.</p>';
+        }
+        const [texto, clase] = etiquetaDePago(cargo);
+        return `
+            <div class="clase-header">
+                <div class="clase-title">${escapeHtml(cargo.descripcion)}</div>
+                <div class="clase-badge ${clase}">${escapeHtml(texto)}</div>
+            </div>
+            <div style="font-size: 0.85rem; color: var(--gray-700);">
+                Monto ${escapeHtml(pesos(cargo.monto))} · Pagado ${escapeHtml(pesos(cargo.pagado))} ·
+                <strong>Saldo ${escapeHtml(pesos(cargo.saldo))}</strong>
+                ${cargo.fecha_limite ? ` · Fecha límite: ${escapeHtml(formatearDia(cargo.fecha_limite))}` : ''}
+            </div>`;
+    };
+
+    const bloqueInscritos = inscritos === null ? '' : `
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-title" style="margin-bottom: 0.75rem;">Inscritos (${escapeHtml(inscritos.length)} de ${escapeHtml(curso.cupo_maximo)})</div>
+            ${inscritos.length === 0 ? '<p>Aún no hay alumnos inscritos.</p>' : inscritos.map(i => {
+                const [texto, clase] = i.cargo ? etiquetaDePago(i.cargo) : ['Sin costo', 'badge-completed'];
+                return `
+                <div class="clase-item">
+                    <div class="clase-header">
+                        <div class="clase-title">${escapeHtml(i.nombre)} · ${escapeHtml(i.matricula)}</div>
+                        <div class="clase-badge ${clase}">${escapeHtml(texto)}</div>
+                    </div>
+                    ${i.cargo ? `<div style="font-size: 0.85rem; color: var(--gray-700);">Pagado ${escapeHtml(pesos(i.cargo.pagado))} de ${escapeHtml(pesos(i.cargo.monto))}</div>` : ''}
+                </div>`;
+            }).join('')}
+        </div>`;
+
+    const urlAdmin = `${location.protocol}//${location.hostname}:8000/admin/servicios/centroidiomas/${encodeURIComponent(curso.id)}/change/`;
+
+    container.innerHTML = `
+        <button type="button" class="btn-salir" id="idioma-volver" style="margin-bottom: 1rem;">← Volver al Centro de Idiomas</button>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon" style="background: ${estilo.fondo};">${estilo.bandera}</div>
+                <div class="card-title">${escapeHtml(curso.nombre_curso)}</div>
+            </div>
+            <div class="card-description">
+                <p>${escapeHtml(curso.idioma_nombre)} · Nivel ${escapeHtml(curso.nivel_nombre.toLowerCase())}</p>
+                <p style="margin-top: 0.5rem;"><strong>Instructor:</strong> ${escapeHtml(curso.instructor)}</p>
+                <p><strong>Inicio:</strong> ${escapeHtml(formatearDia(curso.fecha_inicio))} · ${escapeHtml(curso.duracion_semanas)} semanas</p>
+                <p><strong>Horario:</strong> ${escapeHtml(curso.horario || 'Por definir')}</p>
+                <p><strong>Lugar:</strong> ${escapeHtml(curso.lugar || 'Por definir')}</p>
+            </div>
+        </div>
+        ${esStaff ? '' : `
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-title" style="margin-bottom: 0.75rem;">Mi pago</div>
+            ${bloquePago(cargo)}
+            ${cargo && cargo.estado !== 'pagado' ? '<button type="button" class="btn btn-primary" id="idioma-ir-pagos" style="margin-top: 0.75rem;">Ir a Pagos</button>' : ''}
+        </div>`}
+        <div class="card" style="margin-top: 1rem;">
+            <div class="clase-header" style="margin-bottom: 0.75rem;">
+                <div class="card-title">Próximas clases</div>
+                ${esStaff ? '<button type="button" class="btn btn-primary idioma-agregar" data-tipo="clase">＋ Agregar clase</button>' : ''}
+            </div>
+            <div id="idioma-form-clase"></div>
+            ${proximas.length ? proximas.map(c => filaClase(c, false)).join('') : '<p>Aún no hay clases programadas.</p>'}
+            ${pasadas.length ? `<div class="card-title" style="margin: 1rem 0 0.75rem; font-size: 1rem;">Clases anteriores</div>${pasadas.map(c => filaClase(c, true)).join('')}` : ''}
+        </div>
+        <div class="card" style="margin-top: 1rem;">
+            <div class="clase-header" style="margin-bottom: 0.75rem;">
+                <div class="card-title">Materiales</div>
+                ${esStaff ? '<button type="button" class="btn btn-primary idioma-agregar" data-tipo="material">＋ Agregar material</button>' : ''}
+            </div>
+            <div id="idioma-form-material"></div>
+            ${materiales.length ? materiales.map(filaMaterial).join('') : '<p>Aún no hay materiales publicados.</p>'}
+        </div>
+        ${bloqueInscritos}
+        ${esStaff ? `<p style="margin-top: 1rem; color: white; font-size: 0.9rem;">Para cambiar el precio, el cupo o el horario del curso usa el
+            <a href="${escapeHtml(urlAdmin)}" target="_blank" rel="noopener noreferrer" style="color: white; font-weight: 600;">panel de administración</a>.</p>` : ''}
+    `;
+    document.getElementById('idioma-volver').addEventListener('click', loadIdiomas);
+    const irPagos = document.getElementById('idioma-ir-pagos');
+    if (irPagos) irPagos.addEventListener('click', () => showSection('pagos'));
+    if (esStaff) activarEdicionIdiomas(curso, clases, materiales);
+}
+
+// ---- Edición de clases y materiales (solo staff) ----
+
+// ISO → valor de <input type="datetime-local"> en hora local ("2026-12-01T18:00")
+function aInputLocal(iso) {
+    const f = new Date(iso);
+    const dos = n => String(n).padStart(2, '0');
+    return `${f.getFullYear()}-${dos(f.getMonth() + 1)}-${dos(f.getDate())}T${dos(f.getHours())}:${dos(f.getMinutes())}`;
+}
+
+function filaFormulario(etiqueta, campo) {
+    return `<label style="display: block; margin-bottom: 0.75rem; font-size: 0.85rem; font-weight: 600;">${etiqueta}${campo}</label>`;
+}
+
+function pieFormulario(titulo) {
+    return `
+        <p class="idioma-form-error" role="alert" style="color: var(--danger); font-size: 0.85rem; margin-bottom: 0.5rem;"></p>
+        <div style="display: flex; gap: 0.5rem;">
+            <button type="submit" class="btn btn-primary">${titulo}</button>
+            <button type="button" class="btn-salir" data-cancelar>Cancelar</button>
+        </div>`;
+}
+
+function formularioClase(c) {
+    const campo = 'style="' + ESTILO_CAMPO + ' margin-top: 0.25rem; font-weight: 400;"';
+    return `
+        <form style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+            <div style="font-weight: 600; margin-bottom: 0.75rem;">${c ? 'Editar clase' : 'Nueva clase'}</div>
+            ${filaFormulario('Título', `<input name="titulo" required maxlength="200" value="${escapeHtml(c ? c.titulo : '')}" ${campo}>`)}
+            ${filaFormulario('Fecha y hora', `<input name="fecha_hora" type="datetime-local" required value="${c ? escapeHtml(aInputLocal(c.fecha_hora)) : ''}" ${campo}>`)}
+            ${filaFormulario('Duración (minutos)', `<input name="duracion_minutos" type="number" min="15" max="480" step="5" required value="${escapeHtml(c ? c.duracion_minutos : 60)}" ${campo}>`)}
+            ${filaFormulario('Enlace de la videollamada (opcional)', `<input name="enlace" type="url" maxlength="200" placeholder="https://" value="${escapeHtml(c ? c.enlace : '')}" ${campo}>`)}
+            ${filaFormulario('Notas (opcional)', `<textarea name="notas" rows="2" maxlength="1000" ${campo}>${escapeHtml(c ? c.notas : '')}</textarea>`)}
+            ${pieFormulario(c ? 'Guardar cambios' : 'Agregar clase')}
+        </form>`;
+}
+
+function formularioMaterial(m) {
+    const campo = 'style="' + ESTILO_CAMPO + ' margin-top: 0.25rem; font-weight: 400;"';
+    return `
+        <form style="background: var(--gray-50); border: 1px solid var(--gray-200); border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+            <div style="font-weight: 600; margin-bottom: 0.75rem;">${m ? 'Editar material' : 'Nuevo material'}</div>
+            ${filaFormulario('Título', `<input name="titulo" required maxlength="200" value="${escapeHtml(m ? m.titulo : '')}" ${campo}>`)}
+            ${filaFormulario('Descripción (opcional)', `<textarea name="descripcion" rows="2" maxlength="1000" ${campo}>${escapeHtml(m ? m.descripcion : '')}</textarea>`)}
+            ${filaFormulario('Enlace (opcional)', `<input name="enlace" type="url" maxlength="200" placeholder="https://" value="${escapeHtml(m ? m.enlace : '')}" ${campo}>`)}
+            ${filaFormulario('Orden', `<input name="orden" type="number" min="0" required value="${escapeHtml(m ? m.orden : 0)}" ${campo}>`)}
+            <label style="display: block; margin-bottom: 0.75rem; font-size: 0.9rem;">
+                <input name="publicado" type="checkbox" ${!m || m.publicado ? 'checked' : ''}> Publicado (si no, queda como borrador y solo lo ve el staff)
+            </label>
+            ${pieFormulario(m ? 'Guardar cambios' : 'Agregar material')}
+        </form>`;
+}
+
+function datosClase(form) {
+    const f = form.elements;
+    return {
+        titulo: f.titulo.value.trim(),
+        fecha_hora: new Date(f.fecha_hora.value).toISOString(),  // el campo está en hora local
+        duracion_minutos: Number(f.duracion_minutos.value),
+        enlace: f.enlace.value.trim(),
+        notas: f.notas.value.trim(),
+    };
+}
+
+function datosMaterial(form) {
+    const f = form.elements;
+    return {
+        titulo: f.titulo.value.trim(),
+        descripcion: f.descripcion.value.trim(),
+        enlace: f.enlace.value.trim(),
+        orden: Number(f.orden.value),
+        publicado: f.publicado.checked,
+    };
+}
+
+function activarEdicionIdiomas(curso, clases, materiales) {
+    const container = document.getElementById('idiomas-contenido');
+    const config = {
+        clase: { lista: clases, host: 'idioma-form-clase', formulario: formularioClase, datos: datosClase, ruta: '/idiomas-clases/', nombre: 'la clase' },
+        material: { lista: materiales, host: 'idioma-form-material', formulario: formularioMaterial, datos: datosMaterial, ruta: '/idiomas-materiales/', nombre: 'el material' },
+    };
+
+    const abrir = (tipo, elemento) => {
+        const { host, formulario, datos, ruta } = config[tipo];
+        const lugar = document.getElementById(host);
+        lugar.innerHTML = formulario(elemento);
+        lugar.scrollIntoView({ block: 'nearest' });
+        const form = lugar.querySelector('form');
+        form.querySelector('[data-cancelar]').addEventListener('click', () => { lugar.innerHTML = ''; });
+        form.addEventListener('submit', async evento => {
+            evento.preventDefault();
+            const error = form.querySelector('.idioma-form-error');
+            const boton = form.querySelector('button[type="submit"]');
+            error.textContent = '';
+            boton.disabled = true;
+            try {
+                const cuerpo = { ...datos(form), curso: curso.id };
+                const respuesta = await api(elemento ? `${ruta}${encodeURIComponent(elemento.id)}/` : ruta,
+                                            { method: elemento ? 'PATCH' : 'POST', body: JSON.stringify(cuerpo) });
+                if (respuesta.ok) {
+                    abrirCursoIdiomas(curso.id);  // vuelve a cargar la vista con el cambio
+                    return;
+                }
+                const detalle = await respuesta.json().catch(() => ({}));
+                error.textContent = mensajeDeError(detalle, 'No se pudo guardar.');
+            } catch {
+                error.textContent = 'No hay conexión con el servidor.';
+            }
+            boton.disabled = false;
+        });
+    };
+
+    container.querySelectorAll('.idioma-agregar').forEach(boton => {
+        boton.addEventListener('click', () => abrir(boton.dataset.tipo, null));
+    });
+    container.querySelectorAll('.idioma-editar').forEach(boton => {
+        boton.addEventListener('click', () => {
+            const elemento = config[boton.dataset.tipo].lista.find(e => String(e.id) === boton.dataset.id);
+            if (elemento) abrir(boton.dataset.tipo, elemento);
+        });
+    });
+    container.querySelectorAll('.idioma-borrar').forEach(boton => {
+        boton.addEventListener('click', async () => {
+            const { ruta, nombre } = config[boton.dataset.tipo];
+            if (!confirm(`¿Eliminar ${nombre}? Esta acción no se puede deshacer.`)) return;
+            boton.disabled = true;
+            const respuesta = await api(`${ruta}${encodeURIComponent(boton.dataset.id)}/`, { method: 'DELETE' }).catch(() => null);
+            if (respuesta && respuesta.ok) {
+                abrirCursoIdiomas(curso.id);
+            } else {
+                boton.textContent = 'No se pudo eliminar';
+                boton.disabled = false;
+            }
+        });
+    });
 }
 
 // ---------- Tareas ----------

@@ -3,15 +3,16 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cuentas.permisos import AlcancePorRolMixin, EstudianteAutor, SoloStaffEscribe
 from cuentas.roles import ESTUDIANTE, PROFESOR, STAFF, estudiante_de, rol_de
 from notificaciones.correo import avisar_respuesta_ticket
-from pagos.models import cargar_curso_idiomas, cargo_vigente_de_idiomas
-from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
-from .serializers import BibliotecaDigitalSerializer, MesaAyudaSerializer, EventoCalendarioSerializer, CentroIdiomasSerializer
+from pagos.models import Cargo, cargar_curso_idiomas, cargo_vigente_de_idiomas, con_pagado
+from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas, ClaseIdiomas, MaterialIdiomas
+from .serializers import (BibliotecaDigitalSerializer, MesaAyudaSerializer, EventoCalendarioSerializer,
+                          CentroIdiomasSerializer, ClaseIdiomasSerializer, MaterialIdiomasSerializer)
 
 class BibliotecaDigitalViewSet(viewsets.ModelViewSet):
     queryset = BibliotecaDigital.objects.order_by('titulo')
@@ -88,6 +89,9 @@ class CentroIdiomasViewSet(viewsets.ModelViewSet):
             # Bloquea el curso para que dos inscripciones simultáneas no rebasen el cupo
             curso = CentroIdiomas.objects.select_for_update().get(pk=self.get_object().pk)
             if not curso.estudiantes_inscritos.filter(pk=estudiante.pk).exists():
+                if curso.fecha_inicio < timezone.localdate():
+                    return Response({'detail': 'Este curso ya inició: las inscripciones están cerradas.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
                 if curso.cupos_disponibles <= 0:
                     return Response({'detail': 'Ya no hay cupo en este curso.'}, status=status.HTTP_400_BAD_REQUEST)
                 curso.estudiantes_inscritos.add(estudiante)
@@ -110,8 +114,95 @@ class CentroIdiomasViewSet(viewsets.ModelViewSet):
             curso.estudiantes_inscritos.remove(estudiante)
         return Response(self.get_serializer(curso).data)
 
+    @action(detail=True, methods=['get'])
+    def mi_curso(self, request, pk=None):
+        """Lo que el alumno inscrito recibe del curso: horario, clases, materiales y el estado de su pago. El staff lo ve completo."""
+        curso = self.get_object()
+        estudiante = estudiante_de(request.user)
+        inscrito = estudiante is not None and curso.estudiantes_inscritos.filter(pk=estudiante.pk).exists()
+        if not (request.user.is_staff or inscrito):
+            raise PermissionDenied('Inscríbete al curso para ver sus clases y materiales.')
+
+        materiales = curso.materiales.all()
+        if not request.user.is_staff:
+            materiales = materiales.filter(publicado=True)
+        cargo = cargo_vigente_de_idiomas(curso, estudiante) if inscrito else None
+        return Response({
+            'curso': self.get_serializer(curso).data,
+            'clases': ClaseIdiomasSerializer(curso.clases.all(), many=True).data,
+            'materiales': MaterialIdiomasSerializer(materiales, many=True).data,
+            'cargo': datos_de_cargo(cargo),
+        })
+
+    @action(detail=True, methods=['get'])
+    def inscritos(self, request, pk=None):
+        """Solo staff: quién está inscrito y cómo va su pago."""
+        if not request.user.is_staff:
+            raise PermissionDenied('Solo el staff puede ver la lista de inscritos.')
+        curso = self.get_object()
+        cargos = {c.estudiante_id: c for c in con_pagado(Cargo.objects.filter(curso_idiomas=curso, cancelado=False))}
+        return Response([
+            {
+                'estudiante': e.id,
+                'nombre': f'{e.nombre} {e.apellido}',
+                'matricula': e.matricula,
+                'cargo': datos_de_cargo(cargos.get(e.id)),
+            }
+            for e in curso.estudiantes_inscritos.order_by('apellido', 'nombre')
+        ])
+
     def _estudiante(self):
         estudiante = estudiante_de(self.request.user)
         if estudiante is None:
             raise PermissionDenied('Solo los estudiantes pueden inscribirse a cursos de idiomas.')
         return estudiante
+
+
+def datos_de_cargo(cargo):
+    """Resumen del cargo de un curso de idiomas (None si el curso es gratis o no hay cargo vigente)."""
+    if cargo is None:
+        return None
+    return {
+        'descripcion': cargo.descripcion,
+        'monto': cargo.monto,
+        'pagado': cargo.pagado,
+        'saldo': cargo.saldo,
+        'estado': cargo.estado,
+        'fecha_limite': cargo.fecha_limite,
+        'vencido': cargo.vencido,
+    }
+
+
+class ContenidoDeCursoIdiomas(viewsets.ModelViewSet):
+    """Clases y materiales: el staff los administra; el alumno solo lee los de los cursos en que está inscrito."""
+    permission_classes = [IsAuthenticated, SoloStaffEscribe]
+
+    def para_alumno(self, qs):
+        return qs
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if not self.request.user.is_staff:
+            estudiante = estudiante_de(self.request.user)
+            if estudiante is None:
+                return qs.none()
+            qs = self.para_alumno(qs.filter(curso__estudiantes_inscritos=estudiante, curso__activo=True))
+        curso = self.request.query_params.get('curso')
+        if curso is not None:
+            if not curso.isdigit():
+                raise ValidationError({'curso': 'Debe ser un id numérico.'})
+            qs = qs.filter(curso_id=curso)
+        return qs
+
+
+class ClaseIdiomasViewSet(ContenidoDeCursoIdiomas):
+    queryset = ClaseIdiomas.objects.select_related('curso')
+    serializer_class = ClaseIdiomasSerializer
+
+
+class MaterialIdiomasViewSet(ContenidoDeCursoIdiomas):
+    queryset = MaterialIdiomas.objects.select_related('curso')
+    serializer_class = MaterialIdiomasSerializer
+
+    def para_alumno(self, qs):
+        return qs.filter(publicado=True)  # los borradores son del staff

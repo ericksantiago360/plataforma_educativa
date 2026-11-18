@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from cuentas.roles import estudiante_de
-from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas
+from .models import BibliotecaDigital, MesaAyuda, EventoCalendario, CentroIdiomas, ClaseIdiomas, MaterialIdiomas
 
 class BibliotecaDigitalSerializer(serializers.ModelSerializer):
     tipo_recurso_nombre = serializers.CharField(source='get_tipo_recurso_display', read_only=True)
@@ -48,4 +48,14 @@ class CentroIdiomasSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CentroIdiomas
+        fields = '__all__'
+
+class ClaseIdiomasSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClaseIdiomas
+        fields = '__all__'
+
+class MaterialIdiomasSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MaterialIdiomas
         fields = '__all__'
