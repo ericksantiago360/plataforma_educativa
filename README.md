@@ -563,7 +563,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 - ✅ Adaptable a móviles, tablets y desktop
 - ✅ Sidebar colapsable
 - ✅ Cards con hover effects
-- ✅ Colores inspirados en UVEG
+- ✅ Colores inspirados SANTAL
 
 ### Navegación Dinámica
 - ✅ Cambio de secciones sin recargar página
@@ -741,7 +741,7 @@ Cada app de Django sigue la misma estructura: `models.py`, `serializers.py`, `vi
 Has creado exitosamente una **plataforma educativa completa** con:
 - ✅ Backend profesional con API REST
 - ✅ Autenticación y permisos por rol
-- ✅ Frontend moderno estilo UVEG
+- ✅ Frontend moderno estilo santal
 - ✅ Infraestructura escalable con Docker
 - ✅ Base de datos relacional
 - ✅ Integración completa frontend-backend
