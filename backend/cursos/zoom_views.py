@@ -71,7 +71,7 @@ class ClaseZoomViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
         return Response(serializer.data)
 
 class ParticipanteClaseViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
-    queryset = ParticipanteClase.objects.select_related('estudiante')
+    queryset = ParticipanteClase.objects.select_related('estudiante').order_by('clase_id', 'estudiante_id')
     serializer_class = ParticipanteClaseSerializer
     permission_classes = [IsAuthenticated, ProfesorEscribe]
     ruta_estudiante = 'estudiante'

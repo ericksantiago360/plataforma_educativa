@@ -26,7 +26,8 @@ class ConceptoPagoViewSet(viewsets.ModelViewSet):
 
 def _cargos_de(user):
     """Cargos visibles: el staff ve todos, el alumno los suyos y nadie más ve dinero ajeno."""
-    qs = con_pagado(Cargo.objects.select_related('estudiante')).prefetch_related('pagos__registrado_por')
+    # El orden va explícito: la anotación de lo pagado agrupa y Django ignora el orden por defecto del modelo
+    qs = con_pagado(Cargo.objects.select_related('estudiante')).prefetch_related('pagos__registrado_por').order_by('-creado')
     rol = rol_de(user)
     if rol == STAFF:
         return qs

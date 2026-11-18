@@ -5,7 +5,7 @@ from .models import PerfilEstudiante, Tutor, AsignacionTutor
 from .serializers import PerfilEstudianteSerializer, TutorSerializer, AsignacionTutorSerializer
 
 class PerfilEstudianteViewSet(AlcancePorRolMixin, viewsets.ModelViewSet):
-    queryset = PerfilEstudiante.objects.all()
+    queryset = PerfilEstudiante.objects.order_by('pk')
     serializer_class = PerfilEstudianteSerializer
     permission_classes = [IsAuthenticated, SoloStaffEscribe]
     ruta_estudiante = 'estudiante'
